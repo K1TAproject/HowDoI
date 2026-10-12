@@ -1,0 +1,48 @@
+# Local tools and private configuration
+.codegraph/
+.serena/
+.local/
+.tools/
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+key.properties
+local.properties
+
+# Flutter / Dart and native build output
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+.gradle/
+.kotlin/
+**/flutter/ephemeral/
+android/captures/
+*.apk
+*.aab
+
+# Scratch files and local app data
+work/
+*.log
+*.tmp
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Keep pubspec.lock tracked when the Flutter application is created.
