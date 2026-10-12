@@ -1,0 +1,24 @@
+name: howdoi
+description: 离线旅行路书
+publish_to: none
+version: 0.1.0+1
+environment:
+  sdk: '>=3.8.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  sqlite3: ^3.1.0
+  path_provider: ^2.1.5
+  file_picker: ^10.3.10
+  timezone: ^0.10.1
+  uuid: ^4.5.2
+  crypto: ^3.0.7
+  basic_utils: ^5.8.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true

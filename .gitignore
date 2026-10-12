@@ -44,5 +44,7 @@ work/
 Thumbs.db
 Desktop.ini
 .DS_Store
+*.iml
+dist/
 
 # Keep pubspec.lock tracked when the Flutter application is created.
