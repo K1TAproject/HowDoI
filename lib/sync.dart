@@ -179,6 +179,12 @@ class SyncService extends ChangeNotifier {
         return;
       }
       final envelope = jsonDecode(text);
+      if (envelope is Map && envelope['version'] != 2) {
+        request.response.statusCode = 409;
+        request.response.write('数据版本不兼容，请使用支持 0.1.1 数据的客户端；未合并任何记录');
+        _status('旧版客户端不兼容 · 请勿与 0.1.0 同步');
+        return;
+      }
       final clock = envelope is Map ? envelope['sentAt'] : null;
       if (clock is! int ||
           (DateTime.now().millisecondsSinceEpoch - clock).abs() > 300000) {

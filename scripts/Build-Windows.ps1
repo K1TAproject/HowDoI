@@ -15,5 +15,5 @@ if (Test-Path -LiteralPath $vswhere) {
     if ($crt) { Get-ChildItem -LiteralPath $crt -Filter '*.dll' | Copy-Item -Destination $releaseDir -Force }
   }
 }
-Compress-Archive -Path "$releaseDir/*" -DestinationPath dist/HowDoI-0.1.0-windows-x64.zip -Force
-Write-Output 'Windows 便携包已生成：dist/HowDoI-0.1.0-windows-x64.zip'
+Compress-Archive -Path "$releaseDir/*" -DestinationPath dist/HowDoI-0.1.1-windows-x64.zip -Force
+Write-Output 'Windows 便携包已生成：dist/HowDoI-0.1.1-windows-x64.zip'

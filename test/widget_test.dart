@@ -8,6 +8,61 @@ import 'core_test.dart' show tripData, itemData;
 
 void main() {
   setUpAll(tzdata.initializeTimeZones);
+  testWidgets('Flight key fields, pickers and unsaved switch protection', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = Store(':memory:');
+    final sync = SyncService(store, host: true);
+    final trip = store.save('trip', tripData());
+    final flight = store.save('item', {
+      ...itemData(trip.id, '', type: '航班'),
+      'fields': {
+        'origin': '上海浦东',
+        'destination': '巴黎',
+        'number': 'MU示例',
+        'terminalFrom': 'T1',
+        'terminalTo': 'T2',
+        'seat': '8A',
+      },
+    });
+    await tester.pumpWidget(HowDoI(store: store, sync: sync));
+    await tester.pumpAndSettle();
+    expect(find.text('上海浦东 → 巴黎'), findsOneWidget);
+    expect(find.text('MU示例'), findsOneWidget);
+    expect(find.textContaining('T1'), findsOneWidget);
+    expect(find.textContaining('8A'), findsNothing);
+    await tester.tap(find.text('上海浦东 → 巴黎'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择时区'), findsNothing);
+    await tester.tap(find.byTooltip('选择出发时间'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择时间 · 24小时制'), findsOneWidget);
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('待安排').first);
+    await tester.pumpAndSettle();
+    expect(find.text('尚未保存的修改'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('选择到达日期'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    await tester.tap(find.text('取消').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存行程'));
+    await tester.pumpAndSettle();
+    expect(store.get(flight.id)!.data['fields']['startTime'], '00:00');
+    expect(store.get(flight.id)!.data['fields']['seat'], '8A');
+    expect(store.get(flight.id)!.data['name'], '');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    sync.dispose();
+    store.dispose();
+  });
   testWidgets('Create an undated trip from the empty application', (
     tester,
   ) async {

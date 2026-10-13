@@ -6,6 +6,8 @@ import 'model.dart';
 import 'store.dart';
 import 'editors.dart';
 import 'sync.dart';
+import 'planner.dart';
+import 'pickers.dart';
 
 class Home extends StatefulWidget {
   final Store store;
@@ -19,6 +21,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   String? tripId, editId;
   int day = 1;
   bool editing = false;
+  GlobalKey<ItemEditorState> editorKey = GlobalKey<ItemEditorState>();
+  final expandedNotes = <String>{};
+  Future<bool> leaveEditor() async =>
+      await editorKey.currentState?.mayLeave() ?? true;
   Store get store => widget.store;
   @override
   void initState() {
@@ -48,7 +54,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  void selectDay(int value) {
+  Future<void> selectDay(int value) async {
+    if (!await leaveEditor() || !mounted) return;
     setState(() {
       day = value;
       editing = false;
@@ -56,7 +63,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     store.setSetting('selectedDay', '$day');
   }
 
-  void selectTrip(Record trip) {
+  Future<void> selectTrip(Record trip) async {
+    if (!await leaveEditor() || !mounted) return;
     setState(() {
       tripId = trip.id;
       editing = false;
@@ -65,7 +73,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       final offset = start == null
           ? -1
           : DateTime(now.year, now.month, now.day).difference(start).inDays;
-      day = offset >= 0 && offset < trip.data['days'] ? offset + 1 : 1;
+      final days = store.visibleDays(trip.id);
+      day = days.contains(offset + 1) ? offset + 1 : days.firstOrNull ?? 0;
     });
     store.setSetting('selectedTrip', trip.id);
     store.setSetting('selectedDay', '$day');
@@ -114,7 +123,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     }
   }
 
-  void openEditor(Record trip, Record? item, bool wide) {
+  Future<void> openEditor(Record trip, Record? item, bool wide) async {
+    if (!await leaveEditor() || !mounted) return;
+    editorKey = GlobalKey<ItemEditorState>();
     if (wide) {
       setState(() {
         editId = item?.id;
@@ -123,14 +134,21 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     } else {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (c) => Scaffold(
-            body: SafeArea(
-              child: ItemEditor(
-                store: store,
-                trip: trip,
-                day: day,
-                item: item,
-                onClose: () => Navigator.pop(c),
+          builder: (c) => PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, _) async {
+              if (!didPop && await leaveEditor() && c.mounted) Navigator.pop(c);
+            },
+            child: Scaffold(
+              body: SafeArea(
+                child: ItemEditor(
+                  key: editorKey,
+                  store: store,
+                  trip: trip,
+                  day: day,
+                  item: item,
+                  onClose: () => Navigator.pop(c),
+                ),
               ),
             ),
           ),
@@ -206,12 +224,17 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             leading: const Icon(Icons.luggage_outlined),
             title: Text(t.data['name']),
             subtitle: Text(
-              '${t.data['days']} 天 · ${t.data['start'] == '' ? '日期待定' : t.data['start']}',
+              '${store.visibleDays(t.id).length} 个已安排日 · ${t.data['start'] == '' ? '日期待定' : t.data['start']}',
             ),
             onTap: () => selectTrip(t),
           ),
         OutlinedButton.icon(
-          onPressed: () => editTrip(context, store),
+          onPressed: () async {
+            if (await leaveEditor() && mounted) {
+              setState(() => editing = false);
+              await editTrip(context, store);
+            }
+          },
           icon: const Icon(Icons.add),
           label: const Text('创建旅行'),
         ),
@@ -223,7 +246,24 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             title: const Text('待安排'),
             onTap: () => selectDay(0),
           ),
-          for (var i = 1; i <= trip.data['days']; i++)
+          ListTile(
+            leading: const Icon(Icons.add),
+            title: const Text('添加日期 / 行程'),
+            onTap: () async {
+              if (!await leaveEditor() || !mounted) return;
+              setState(() => editing = false);
+              final selected = await chooseDay(context, trip.data, day);
+              if (selected != null && mounted) {
+                setState(() => day = selected);
+                openEditor(
+                  trip,
+                  null,
+                  MediaQuery.sizeOf(context).width >= 1100,
+                );
+              }
+            },
+          ),
+          for (final i in store.visibleDays(trip.id))
             ListTile(
               selected: day == i,
               title: Text('第 $i 天'),
@@ -242,7 +282,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final f = r.data['fields'] as Map;
     final from = f['fromId'] ?? '', to = f['toId'] ?? '';
     if (from == '' && to == '') return '';
-    final rows = store.dayItems(trip.id, r.data['day']);
+    final rows = store
+        .timeline(trip.id, r.data['day'])
+        .map((n) => n.item)
+        .toList();
     final ids = rows.map((r) => r.id).toList();
     final index = ids.indexOf(r.id),
         left = ids.indexOf(from),
@@ -263,85 +306,206 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     return '';
   }
 
-  Widget itemCard(Record r, Record trip, bool wide) {
-    final d = r.data, f = d['fields'] as Map;
-    final warning = linkWarning(r, trip);
-    final timing = timeSummary(
-      trip,
-      d,
-      store.zone(trip, d['day']),
-      endZone: store.zone(trip, d['endDay']),
-    );
-    return Card(
-      key: ValueKey(r.id),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        leading: Checkbox(
-          value: d['done'],
-          onChanged: (v) {
-            try {
-              store.save('item', {...d, 'done': v}, id: r.id);
-            } catch (e) {
-              notice(context, e);
-            }
-          },
-        ),
-        title: Text(
-          d['name'],
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            decoration: d['done'] ? TextDecoration.lineThrough : null,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${d['type']} · ${f['startTime'] == null || f['startTime'] == '' ? '时间待定' : f['startTime']} · ${d['booking']}',
-            ),
-            if (d['type'] == '住宿')
-              Text('第 ${d['day']} 天入住 → 第 ${d['endDay']} 天退房'),
-            if ((f['address'] ?? '') != '')
-              Text(f['address'], maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (warning.isNotEmpty)
-              Text(
-                warning,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            if (timing.isNotEmpty)
-              Text(
-                timing,
+  Widget itemCard(PlanNode node, Record trip, bool wide, {String? hour}) {
+    final r = node.item, d = r.data;
+    final type = itemType(d), f = d['fields'] as Map;
+    final warning = [
+      dateWarning(trip, d),
+      linkWarning(r, trip),
+    ].where((s) => s.isNotEmpty).join('\n');
+    final info = <String>[];
+    if (scheduledTransport(type)) {
+      if (fieldText(d, 'number').isNotEmpty) info.add(fieldText(d, 'number'));
+      for (final end in [false, true]) {
+        final place = fieldText(d, end ? 'destination' : 'origin');
+        final terminal = fieldText(d, end ? 'terminalTo' : 'terminalFrom');
+        final date = itemDate(trip, d, end);
+        final time = fieldText(d, end ? 'endTime' : 'startTime');
+        info.add(
+          [
+            end ? '到达' : '出发',
+            place,
+            terminal,
+            if (date.isNotEmpty && (end || dateWarning(trip, d).isNotEmpty))
+              date,
+            time,
+          ].where((x) => x.isNotEmpty).join(' · '),
+        );
+      }
+    }
+    if (type == '住宿') {
+      final start = itemDate(trip, d, false), end = itemDate(trip, d, true);
+      info.add(
+        '${start.isEmpty
+            ? d['day'] == 0
+                  ? '入住日待定'
+                  : '第 ${d['day']} 天'
+            : start} 入住 → ${end.isEmpty
+            ? d['endDay'] == 0
+                  ? '退房日待定'
+                  : '第 ${d['endDay']} 天退房'
+            : '$end 退房'}',
+      );
+      if (d['endDay'] > d['day'] && d['day'] > 0) {
+        info.add('共 ${d['endDay'] - d['day']} 晚');
+      }
+    }
+    if (type == '租车') {
+      info.add(fieldText(d, node.end ? 'destination' : 'origin'));
+    }
+    if (fieldText(d, 'address').isNotEmpty) info.add(fieldText(d, 'address'));
+    final detail = <String>[];
+    for (final entry in {
+      if (type == '交通/移动') ...{'mode': '', 'number': '', 'transfer': ''},
+      if (isTransport(type)) 'gate': type == '航班' ? '登机口' : '检票/登船口',
+      if (['铁路', '长途汽车', '轮渡'].contains(type)) ...{
+        'platform': '站台',
+        'carriage': '车厢',
+        'seat': '座位/铺位',
+      },
+    }.entries) {
+      if (fieldText(d, entry.key).isNotEmpty) {
+        detail.add('${entry.value} ${fieldText(d, entry.key)}'.trim());
+      }
+    }
+    if (detail.isNotEmpty) info.add(detail.join(' · '));
+    if (fieldText(d, 'duration').isNotEmpty) {
+      info.add('预计 ${durationText(fieldText(d, 'duration'))}');
+    }
+    if (fieldText(d, 'reservationTime').isNotEmpty) {
+      info.add(
+        '预约 ${fieldText(d, 'reservationDate')} ${fieldText(d, 'reservationTime')}',
+      );
+    }
+    if (fieldText(d, 'reservation').isNotEmpty) {
+      info.add('预约信息：${f['reservation']}');
+    }
+    if (d['booking'] != '不适用') info.add(d['booking']);
+    return Padding(
+      key: ValueKey(node.id),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hour != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 12, top: 12, bottom: 4),
+              child: Text(
+                '$hour:00',
                 style: TextStyle(
-                  color: timing.contains('请')
-                      ? Theme.of(context).colorScheme.error
-                      : null,
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.bold,
                 ),
-                maxLines: 3,
               ),
-          ],
-        ),
-        onTap: () => openEditor(trip, r, wide),
-        trailing: const Padding(
-          padding: EdgeInsets.only(right: 24),
-          child: Icon(Icons.chevron_right),
-        ),
+            ),
+          Card(
+            margin: EdgeInsets.zero,
+            child: InkWell(
+              onTap: () => openEditor(trip, r, wide),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 12, 32, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: wide ? 78 : 56,
+                      child: Column(
+                        children: [
+                          Text(
+                            node.stay
+                                ? '住宿'
+                                : node.time.isEmpty
+                                ? '—'
+                                : node.time,
+                            style: TextStyle(
+                              fontSize: wide ? 17 : 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (node.appointment)
+                            const Text('预约', style: TextStyle(fontSize: 11)),
+                          Checkbox(
+                            value: d['done'],
+                            onChanged: (v) {
+                              store.save('item', {...d, 'done': v}, id: r.id);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${node.prefix}${itemTitle(d)}',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                              decoration: d['done']
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
+                          ),
+                          Text(
+                            type,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                          for (final line in info.where((s) => s.isNotEmpty))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text(line),
+                            ),
+                          if ((d['note'] as String).isNotEmpty)
+                            InkWell(
+                              onTap: () => setState(() {
+                                if (!expandedNotes.add(r.id)) {
+                                  expandedNotes.remove(r.id);
+                                }
+                              }),
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  '备注 · ${d['note']}',
+                                  maxLines: expandedNotes.contains(r.id)
+                                      ? null
+                                      : 1,
+                                  overflow: expandedNotes.contains(r.id)
+                                      ? null
+                                      : TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          if (warning.isNotEmpty)
+                            Text(
+                              warning,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget itinerary(Record trip, bool wide) {
-    final rows = store.dayItems(trip.id, day);
-    final stays = store
-        .items(trip.id)
-        .where(
-          (r) =>
-              r.data['type'] == '住宿' &&
-              r.data['day'] > 0 &&
-              r.data['day'] < day &&
-              r.data['endDay'] >= day,
-        )
-        .toList();
+    final rows = store.timeline(trip.id, day);
+    final stays = planNodes(
+      store.items(trip.id),
+    ).where((n) => n.stay && n.day == day).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -351,82 +515,80 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                day == 0 ? '留给下一段旅程' : '第 $day 天',
-                style: Theme.of(context).textTheme.headlineMedium,
+                day == 0 ? '待安排清单' : dayLabel(trip, day),
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
-              Text(
-                day == 0
-                    ? '收集想去的地方，确定后再安排日期。'
-                    : dayDate(trip.data, day).isEmpty
-                    ? '日期未定，按自己的节奏编排。'
-                    : dayDate(trip.data, day),
-              ),
-              if (day > 0)
-                TextButton.icon(
-                  onPressed: () async {
-                    final v = await pickZone(context, store.zone(trip, day));
-                    if (v != null) {
-                      store.save('day', {
-                        'trip': trip.id,
-                        'day': day,
-                        'zone': v,
-                      }, id: 'day:${trip.id}:$day');
-                    }
-                  },
-                  icon: const Icon(Icons.public, size: 16),
-                  label: Text(store.zone(trip, day)),
-                ),
+              const SizedBox(height: 5),
+              Text(day == 0 ? '先收藏想去的地方，再决定何时出发。' : '按时间规划 · 未定时间的安排可拖动穿插'),
             ],
           ),
         ),
-        for (final r in stays)
-          ListTile(
-            leading: const Icon(Icons.hotel_outlined),
-            title: Text(
-              '${r.data['name']} · ${r.data['endDay'] == day ? '今天退房' : '继续入住'}',
-            ),
-            subtitle: const Text('多晚住宿 · 费用只计一次'),
-            onTap: () => openEditor(trip, r, wide),
-          ),
         Expanded(
-          child: rows.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.route_outlined,
-                        size: 56,
-                        color: Colors.blueGrey,
+          child: ReorderableListView.builder(
+            buildDefaultDragHandles: true,
+            itemCount: rows.length,
+            header: rows.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('还没有安排，添加第一站吧。'),
+                  )
+                : null,
+            footer: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (stays.isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      '当晚住宿',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 12),
-                      const Text('还没有安排，添加第一站吧。'),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: () => openEditor(trip, null, wide),
-                        icon: const Icon(Icons.add),
-                        label: const Text('添加行程'),
-                      ),
-                    ],
+                    ),
                   ),
-                )
-              : ReorderableListView.builder(
-                  itemCount: rows.length,
-                  buildDefaultDragHandles: wide,
-                  padding: const EdgeInsets.only(bottom: 88),
-                  itemBuilder: (c, i) => wide
-                      ? itemCard(rows[i], trip, wide)
-                      : ReorderableDelayedDragStartListener(
-                          key: ValueKey(rows[i].id),
-                          index: i,
-                          child: itemCard(rows[i], trip, wide),
-                        ),
-                  onReorderItem: (a, b) {
-                    final ids = rows.map((r) => r.id).toList();
-                    ids.insert(b, ids.removeAt(a));
-                    store.reorder(trip.id, day, ids);
-                  },
-                ),
+                for (final stay in stays) itemCard(stay, trip, wide),
+                const SizedBox(height: 96),
+              ],
+            ),
+            itemBuilder: (c, i) {
+              final hour = rows[i].time.isEmpty || day == 0
+                  ? null
+                  : rows[i].time.split(':').first;
+              final previous = rows
+                  .take(i)
+                  .where((r) => r.time.isNotEmpty)
+                  .lastOrNull
+                  ?.time
+                  .split(':')
+                  .first;
+              return itemCard(
+                rows[i],
+                trip,
+                wide,
+                hour: hour != previous ? hour : null,
+              );
+            },
+            onReorderItem: (a, b) {
+              final moved = rows[a];
+              final proposed = [...rows];
+              proposed.insert(b, proposed.removeAt(a));
+              final timed = proposed
+                  .where((n) => n.time.isNotEmpty)
+                  .map((n) => n.time)
+                  .toList();
+              if (day != 0 &&
+                  moved.time.isNotEmpty &&
+                  !List.generate(
+                    timed.isNotEmpty ? timed.length - 1 : 0,
+                    (i) => timed[i].compareTo(timed[i + 1]) <= 0,
+                  ).every((x) => x)) {
+                notice(context, '已定时行程按时间排序，请修改时间来调整顺序');
+                return;
+              }
+              store.reorder(trip.id, day, proposed.map((n) => n.id).toList());
+            },
+          ),
         ),
       ],
     );
@@ -437,7 +599,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final trips = store.trips;
     final trip =
         trips.where((r) => r.id == tripId).firstOrNull ?? trips.firstOrNull;
-    if (trip != null && day > trip.data['days']) day = 1;
+    if (trip != null &&
+        !editing &&
+        day > 0 &&
+        !store.visibleDays(trip.id).contains(day)) {
+      day = store.visibleDays(trip.id).firstOrNull ?? 0;
+    }
     return LayoutBuilder(
       builder: (context, size) {
         final wide = size.maxWidth >= 1100;
@@ -458,12 +625,19 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 ),
                 IconButton(
                   tooltip: '旅行设置',
-                  onPressed: () => editTrip(context, store, trip),
+                  onPressed: () async {
+                    if (await leaveEditor() && context.mounted) {
+                      setState(() => editing = false);
+                      await editTrip(context, store, trip);
+                    }
+                  },
                   icon: const Icon(Icons.tune),
                 ),
               ],
               PopupMenuButton<String>(
                 onSelected: (v) async {
+                  if (!await leaveEditor() || !context.mounted) return;
+                  setState(() => editing = false);
                   switch (v) {
                     case 'export':
                       await backup(trip);
@@ -523,7 +697,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                             style: const TextStyle(fontSize: 12),
                           ),
                         ),
-                        const Text('本地自动保存', style: TextStyle(fontSize: 12)),
+                        const Text(
+                          '离线可用 · 编辑后保存',
+                          style: TextStyle(fontSize: 12),
+                        ),
                       ],
                     ),
                   ),
@@ -558,7 +735,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                   const Text('离线路书 · 自由编排 · 预算心中有数'),
                                   const SizedBox(height: 24),
                                   FilledButton.icon(
-                                    onPressed: () => editTrip(context, store),
+                                    onPressed: () async {
+                                      if (await leaveEditor() &&
+                                          context.mounted) {
+                                        setState(() => editing = false);
+                                        await editTrip(context, store);
+                                      }
+                                    },
                                     icon: const Icon(Icons.add),
                                     label: const Text('创建第一次旅行'),
                                   ),
@@ -572,7 +755,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                       SizedBox(
                         width: 410,
                         child: ItemEditor(
-                          key: ValueKey('${trip.id}:$editId:$day'),
+                          key: editorKey,
                           store: store,
                           trip: trip,
                           day: day,

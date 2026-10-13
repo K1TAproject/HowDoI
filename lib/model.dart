@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 
 const uuid = Uuid();
 const types = [
+  '游览/活动',
+  '交通/移动',
   '游览',
   '餐饮',
   '购物',
@@ -214,15 +216,17 @@ void validateData(String kind, Map<String, dynamic> d) {
       string('note');
       string('booking');
       day('endDay');
-      if ((d['name'] as String).trim().isEmpty ||
-          !types.contains(d['type']) ||
+      if (!types.contains(d['type']) ||
           d['done'] is! bool ||
           !['不适用', '待预订', '已预订'].contains(d['booking']) ||
           d['fields'] is! Map ||
           d['costs'] is! List) {
         throw const FormatException('活动字段无效');
       }
-      if (d['type'] == '住宿' && d['day'] > 0 && d['endDay'] <= d['day']) {
+      if (d['type'] == '住宿' &&
+          d['day'] > 0 &&
+          d['endDay'] > 0 &&
+          d['endDay'] <= d['day']) {
         throw const FormatException('退房日须晚于入住日');
       }
       for (final e in (d['fields'] as Map).entries) {
@@ -233,13 +237,13 @@ void validateData(String kind, Map<String, dynamic> d) {
         }
       }
       final f = Map<String, dynamic>.from(d['fields']);
-      for (final key in ['startDate', 'endDate']) {
+      for (final key in ['startDate', 'endDate', 'reservationDate']) {
         parseDate(f[key] ?? '');
       }
       for (final key in ['startZone', 'endZone']) {
         if ((f[key] ?? '') != '') tz.getLocation(f[key]);
       }
-      for (final key in ['startTime', 'endTime']) {
+      for (final key in ['startTime', 'endTime', 'reservationTime']) {
         if ((f[key] ?? '') != '' &&
             !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(f[key])) {
           throw const FormatException('时间应为 HH:mm');
@@ -282,7 +286,9 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
   final m = jsonDecode(text);
   if (m is! Map ||
       m['format'] != format ||
-      m['version'] != 1 ||
+      (format == 'howdoi-sync'
+          ? m['version'] != 2
+          : ![1, 2].contains(m['version'])) ||
       m['records'] is! List ||
       m['records'].length > 20000) {
     throw const FormatException('不是受支持的 HowDoI 数据文件');

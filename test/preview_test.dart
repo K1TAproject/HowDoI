@@ -87,7 +87,7 @@ void main() {
         ).writeAsBytesSync(png!.buffer.asUint8List());
         image.dispose();
       });
-      await tester.tap(find.text('飞往赫尔辛基'));
+      await tester.tap(find.text('北京 → 赫尔辛基'));
       await tester.pumpAndSettle();
       expect(find.text('已预订'), findsWidgets);
       expect(tester.takeException(), isNull);

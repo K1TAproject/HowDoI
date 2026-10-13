@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'model.dart';
+import 'planner.dart';
 
 class Store extends ChangeNotifier {
   final Database db;
@@ -15,6 +16,16 @@ class Store extends ChangeNotifier {
     db.execute(
       'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
     );
+    if (setting('dataVersion') != '2') {
+      if (path != ':memory:' &&
+          db.select('SELECT id FROM records LIMIT 1').isNotEmpty) {
+        final backup =
+            '$path.pre-0.1.1-${DateTime.now().microsecondsSinceEpoch}.db';
+        db.execute('VACUUM INTO ?', [backup]);
+        setSetting('upgradeBackup', backup);
+      }
+      setSetting('dataVersion', '2');
+    }
     device = setting('device') ?? uuid.v4();
     setSetting('device', device);
   }
@@ -63,6 +74,14 @@ class Store extends ChangeNotifier {
 
   String zone(Record trip, int day) =>
       get('day:${trip.id}:$day')?.data['zone'] as String? ?? trip.data['zone'];
+  List<int> visibleDays(String trip) => (planNodes(
+    items(trip),
+  ).map((n) => n.day).where((d) => d > 0).toSet().toList()..sort());
+  List<PlanNode> timeline(String trip, int day) => orderedNodes(
+    planNodes(items(trip)).where((n) => n.day == day && !n.stay).toList(),
+    get('order:$trip:$day')?.data['ids'] as List? ?? [],
+    timed: day != 0,
+  );
   void _put(Record r) => db.execute(
     'INSERT OR REPLACE INTO records VALUES (?,?)',
     [r.id, jsonEncode(r.toJson())],
@@ -77,6 +96,19 @@ class Store extends ChangeNotifier {
     final key = id ?? uuid.v4();
     final old = get(key);
     if (old != null && old.kind != kind) throw const FormatException('记录类型冲突');
+    final tripId = kind == 'item' ? data['trip'] as String : null;
+    final orders = <int, List<String>>{};
+    if (tripId != null) {
+      for (final day in {
+        for (final node in planNodes([
+          ?old,
+          Record(key, kind, device, 0, deleted, data),
+        ]))
+          if (!node.stay) node.day,
+      }) {
+        orders[day] = timeline(tripId, day).map((n) => n.id).toList();
+      }
+    }
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     final r = Record(
       key,
@@ -86,7 +118,70 @@ class Store extends ChangeNotifier {
       deleted,
       data,
     );
-    _put(r);
+    db.execute('BEGIN IMMEDIATE');
+    try {
+      _put(r);
+      // Preserve the currently visible anchors before changing a timed record.
+      for (final entry in orders.entries) {
+        final orderId = 'order:$tripId:${entry.key}';
+        final prior = get(orderId);
+        final current = planNodes(
+          items(tripId!),
+        ).where((n) => n.day == entry.key && !n.stay).map((n) => n.id).toList();
+        final ids = [
+          ...entry.value.where(current.contains),
+          ...current.where((id) => !entry.value.contains(id)),
+        ];
+        if (prior != null && jsonEncode(prior.data['ids']) == jsonEncode(ids)) {
+          continue;
+        }
+        _put(
+          Record(
+            orderId,
+            'order',
+            device,
+            prior != null && prior.modified >= now ? prior.modified + 1 : now,
+            false,
+            {'trip': tripId, 'day': entry.key, 'ids': ids},
+          ),
+        );
+      }
+      if (kind == 'trip' && old != null && old.data['start'] != data['start']) {
+        for (final item in items(
+          key,
+        ).where((i) => i.data['booking'] != '已预订')) {
+          final fields = Map<String, dynamic>.from(item.data['fields']);
+          for (final end in [false, true]) {
+            final field = end ? 'endDate' : 'startDate';
+            if ((fields[field] ?? '') != '') {
+              fields[field] = dayDate(data, item.data[end ? 'endDay' : 'day']);
+            }
+          }
+          final before = parseDate(old.data['start']),
+              after = parseDate(data['start']);
+          final appointment = parseDate(fields['reservationDate'] ?? '');
+          if (appointment != null && before != null && after != null) {
+            fields['reservationDate'] = dateText(
+              appointment.add(after.difference(before)),
+            );
+          }
+          _put(
+            Record(
+              item.id,
+              item.kind,
+              device,
+              item.modified >= now ? item.modified + 1 : now,
+              false,
+              {...item.data, 'fields': fields},
+            ),
+          );
+        }
+      }
+      db.execute('COMMIT');
+    } catch (_) {
+      db.execute('ROLLBACK');
+      rethrow;
+    }
     generation++;
     notifyListeners();
     return r;
@@ -135,7 +230,7 @@ class Store extends ChangeNotifier {
     );
     return jsonEncode({
       'format': sync ? 'howdoi-sync' : 'howdoi-backup',
-      'version': 1,
+      'version': 2,
       'records': rows
           .where((r) => trip == null || r.id == trip || r.data['trip'] == trip)
           .map((r) => r.toJson())
@@ -164,10 +259,11 @@ class Store extends ChangeNotifier {
         id = '${r.kind}:${d['trip']}:${d['day']}';
       }
       if (r.kind == 'order') {
-        d['ids'] = (d['ids'] as List)
-            .where(ids.containsKey)
-            .map((x) => ids[x])
-            .toList();
+        d['ids'] = [
+          for (final value in d['ids'] as List)
+            if (ids.containsKey((value as String).split('@').first))
+              '${ids[value.split('@').first]}${value.contains('@') ? '@${value.split('@').last}' : ''}',
+        ];
       }
       if (r.kind == 'item') {
         for (final c in d['costs']) {
