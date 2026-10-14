@@ -16,15 +16,15 @@ class Store extends ChangeNotifier {
     db.execute(
       'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
     );
-    if (setting('dataVersion') != '2') {
+    if (setting('dataVersion') != '3') {
       if (path != ':memory:' &&
           db.select('SELECT id FROM records LIMIT 1').isNotEmpty) {
         final backup =
-            '$path.pre-0.1.1-${DateTime.now().microsecondsSinceEpoch}.db';
+            '$path.pre-0.1.2-${DateTime.now().microsecondsSinceEpoch}.db';
         db.execute('VACUUM INTO ?', [backup]);
         setSetting('upgradeBackup', backup);
       }
-      setSetting('dataVersion', '2');
+      setSetting('dataVersion', '3');
     }
     device = setting('device') ?? uuid.v4();
     setSetting('device', device);
@@ -59,24 +59,227 @@ class Store extends ChangeNotifier {
             get(trip)?.deleted == false,
       )
       .toList();
-  List<Record> dayItems(String trip, int day) {
-    final rows = items(trip).where((r) => r.data['day'] == day).toList();
-    final ids = get('order:$trip:$day')?.data['ids'] as List? ?? [];
-    rows.sort((a, b) {
-      final x = ids.indexOf(a.id), y = ids.indexOf(b.id);
-      if (x == -1 && y == -1) return a.id.compareTo(b.id);
-      if (x == -1) return 1;
-      if (y == -1) return -1;
-      return x.compareTo(y);
-    });
-    return rows;
+  List<int> visibleDays(String trip) => ({
+    ...planNodes(items(trip)).map((n) => n.day).where((d) => d > 0),
+    ...all
+        .where(
+          (r) =>
+              r.kind == 'day' &&
+              !r.deleted &&
+              r.data['trip'] == trip &&
+              r.data['explicit'] == true,
+        )
+        .map((r) => r.data['day'] as int),
+  }.toList()..sort());
+  int addDay(Record trip) {
+    final day = (visibleDays(trip.id).lastOrNull ?? 0) + 1;
+    save('day', {
+      'trip': trip.id,
+      'day': day,
+      'zone': trip.data['zone'],
+      'explicit': true,
+    }, id: 'day:${trip.id}:$day');
+    return day;
   }
 
-  String zone(Record trip, int day) =>
-      get('day:${trip.id}:$day')?.data['zone'] as String? ?? trip.data['zone'];
-  List<int> visibleDays(String trip) => (planNodes(
-    items(trip),
-  ).map((n) => n.day).where((d) => d > 0).toSet().toList()..sort());
+  void assignDay(Record item, int day, {int? endDay}) {
+    final latest = get(item.id);
+    if (latest == null || latest.deleted || latest.modified != item.modified) {
+      throw const FormatException('记录已改变，请重新打开');
+    }
+    final data = {...latest.data, 'day': day};
+    if (endDay != null) data['endDay'] = endDay;
+    if (data['endDay'] == 0 && data['type'] != '住宿') data['endDay'] = day;
+    save('item', data, id: item.id);
+  }
+
+  List<Record> primaryItems(String trip, int day) =>
+      items(trip).where((r) => r.data['day'] == day).toList();
+
+  List<Record> relatedItems(String trip, int day) => {
+    for (final n in planNodes(items(trip)))
+      if (n.day == day && n.item.data['day'] != day) n.item.id: n.item,
+  }.values.toList();
+
+  // Validate the whole operation before a single transaction. The preview is
+  // invalidated by any intervening local edit or sync.
+  void changeDay(
+    Record trip,
+    int source, {
+    int? target,
+    bool deleteItems = false,
+    bool requireSourceRemoved = false,
+    required int expectedGeneration,
+  }) {
+    if (generation != expectedGeneration || get(trip.id)?.deleted != false) {
+      throw const FormatException('数据已改变，请重新预览日期操作');
+    }
+    if (source < 1 ||
+        target == source ||
+        target != null && (target < 1 || target > 3660)) {
+      throw const FormatException('请选择不同的有效旅行日');
+    }
+    final primary = primaryItems(trip.id, source);
+    final related = relatedItems(trip.id, source);
+    if ((target == null || requireSourceRemoved) && related.isNotEmpty) {
+      throw const FormatException('此日期仍有住宿覆盖或跨日关联，请先调整原行程日期');
+    }
+    if (primary.isNotEmpty && target == null && !deleteItems) {
+      throw const FormatException('请先选择行程移往的日期');
+    }
+    final changes = <Record>[];
+    final now = DateTime.now().toUtc().microsecondsSinceEpoch;
+    Record updated(
+      String id,
+      String kind,
+      Map<String, dynamic> data, {
+      bool deleted = false,
+    }) {
+      validateData(kind, data);
+      final old = get(id);
+      return Record(
+        id,
+        kind,
+        device,
+        old != null && old.modified >= now ? old.modified + 1 : now,
+        deleted,
+        data,
+      );
+    }
+
+    for (final r in primary) {
+      if (deleteItems) {
+        changes.add(updated(r.id, r.kind, r.data, deleted: true));
+        continue;
+      }
+      final delta = target! - source;
+      final end = r.data['endDay'] as int;
+      final data = {
+        ...r.data,
+        'day': target,
+        'endDay': end == 0 ? 0 : end + delta,
+      };
+      final fields = Map<String, dynamic>.from(r.data['fields']);
+      if (r.data['booking'] != '已预订') {
+        for (final entry in {'startDate': 'day', 'endDate': 'endDay'}.entries) {
+          if ((fields[entry.key] ?? '') != '') {
+            fields[entry.key] = dayDate(trip.data, data[entry.value]);
+          }
+        }
+        final reservation = parseDate(fields['reservationDate'] ?? '');
+        if (reservation != null) {
+          fields['reservationDate'] = dateText(
+            DateTime(
+              reservation.year,
+              reservation.month,
+              reservation.day + delta,
+            ),
+          );
+        }
+      }
+      data['fields'] = fields;
+      changes.add(updated(r.id, r.kind, data));
+    }
+    Map<String, dynamic> dayData(int value) => {
+      ...?get('day:${trip.id}:$value')?.data,
+      'trip': trip.id,
+      'day': value,
+      'zone': trip.data['zone'],
+      'explicit': true,
+    };
+    changes.add(
+      updated('day:${trip.id}:$source', 'day', dayData(source), deleted: true),
+    );
+    if (target != null) {
+      changes.add(updated('day:${trip.id}:$target', 'day', dayData(target)));
+    }
+    final replacements = {
+      for (final r in changes.where((r) => r.kind == 'item')) r.id: r,
+    };
+    final after = items(
+      trip.id,
+    ).map((r) => replacements[r.id] ?? r).where((r) => !r.deleted).toList();
+    final beforeNodes = planNodes(items(trip.id)),
+        afterNodes = planNodes(after);
+    if (requireSourceRemoved && afterNodes.any((n) => n.day == source)) {
+      throw const FormatException('移动后的住宿或跨日记录仍覆盖原日期，请选择其他目标日或先调整原行程');
+    }
+    for (final d in {
+      ...beforeNodes
+          .where((n) => replacements.containsKey(n.item.id))
+          .map((n) => n.day),
+      ...afterNodes
+          .where((n) => replacements.containsKey(n.item.id))
+          .map((n) => n.day),
+      source,
+      ?target,
+    }) {
+      final current = afterNodes
+          .where((n) => n.day == d && !n.stay)
+          .map((n) => n.id)
+          .toList();
+      final prior = timeline(trip.id, d).map((n) => n.id).toList();
+      // Existing target anchors first, then moved source anchors; timed groups
+      // continue to use orderedNodes when displayed.
+      final incoming = beforeNodes
+          .where((n) => n.day != d && current.contains(n.id))
+          .map((n) => n.day)
+          .toSet();
+      final preferred = [
+        ...prior,
+        for (final oldDay in incoming)
+          ...timeline(trip.id, oldDay).map((n) => n.id),
+      ];
+      final ids = {...preferred.where(current.contains), ...current}.toList();
+      if (listEquals(get('order:${trip.id}:$d')?.data['ids'] as List?, ids)) {
+        continue;
+      }
+      changes.add(
+        updated('order:${trip.id}:$d', 'order', {
+          'trip': trip.id,
+          'day': d,
+          'ids': ids,
+        }),
+      );
+    }
+    merge(changes);
+  }
+
+  void undoEmptyDay(Record deletedDay) {
+    final current = get(deletedDay.id);
+    if (current == null ||
+        !current.deleted ||
+        current.modified != deletedDay.modified) {
+      throw const FormatException('此日期已再次改变，无法撤销');
+    }
+    if (get(deletedDay.data['trip'])?.deleted != false) {
+      throw const FormatException('旅行已删除');
+    }
+    save('day', deletedDay.data, id: deletedDay.id);
+  }
+
+  void snapshot(String target) => db.execute('VACUUM INTO ?', [target]);
+  void restoreSnapshot(String source) {
+    db.execute('ATTACH DATABASE ? AS update_backup', [source]);
+    try {
+      db.execute('BEGIN IMMEDIATE');
+      try {
+        db.execute('DELETE FROM records');
+        db.execute('INSERT INTO records SELECT * FROM update_backup.records');
+        db.execute('DELETE FROM settings');
+        db.execute('INSERT INTO settings SELECT * FROM update_backup.settings');
+        db.execute('COMMIT');
+      } catch (_) {
+        db.execute('ROLLBACK');
+        rethrow;
+      }
+    } finally {
+      db.execute('DETACH DATABASE update_backup');
+    }
+    generation++;
+    notifyListeners();
+  }
+
   List<PlanNode> timeline(String trip, int day) => orderedNodes(
     planNodes(items(trip)).where((n) => n.day == day && !n.stay).toList(),
     get('order:$trip:$day')?.data['ids'] as List? ?? [],
@@ -230,7 +433,7 @@ class Store extends ChangeNotifier {
     );
     return jsonEncode({
       'format': sync ? 'howdoi-sync' : 'howdoi-backup',
-      'version': 2,
+      'version': 3,
       'records': rows
           .where((r) => trip == null || r.id == trip || r.data['trip'] == trip)
           .map((r) => r.toJson())

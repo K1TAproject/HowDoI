@@ -1,6 +1,8 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/standard_method_codec.h>
+#include <flutter/method_result_functions.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -25,6 +27,9 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "howdoi/window",
+      &flutter::StandardMethodCodec::GetInstance());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +45,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -62,6 +68,28 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_CLOSE:
+      if (window_channel_) {
+        if (!closing_) {
+          closing_ = true;
+          window_channel_->InvokeMethod("requestClose", nullptr,
+              std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+                  [hwnd](const flutter::EncodableValue* value) {
+                    const bool* allowed = value ? std::get_if<bool>(value) : nullptr;
+                    PostMessage(hwnd, WM_APP + 42, allowed && *allowed, 0);
+                  },
+                  [hwnd](const std::string&, const std::string&, const flutter::EncodableValue*) {
+                    PostMessage(hwnd, WM_APP + 42, FALSE, 0);
+                  },
+                  [hwnd]() { PostMessage(hwnd, WM_APP + 42, TRUE, 0); }));
+        }
+        return 0;
+      }
+      break;
+    case WM_APP + 42:
+      closing_ = false;
+      if (wparam) return Win32Window::MessageHandler(hwnd, WM_CLOSE, 0, 0);
+      return 0;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

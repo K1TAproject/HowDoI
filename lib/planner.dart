@@ -56,6 +56,18 @@ String itemDate(Record trip, Map<String, dynamic> d, bool end) {
 String dayLabel(Record trip, int day) => day == 0
     ? '待安排'
     : '${dayDate(trip.data, day).isEmpty ? '' : '${dayDate(trip.data, day)} · '}第 $day 天';
+String dayTitle(Record trip, int day) {
+  final date = parseDate(dayDate(trip.data, day));
+  return date == null
+      ? '第 $day 天'
+      : '${date.month}月${date.day}日 · 周${'一二三四五六日'[date.weekday - 1]}';
+}
+
+String daySubtitle(Record trip, int day) {
+  final date = parseDate(dayDate(trip.data, day));
+  return date == null ? '' : '第 $day 天 · ${date.year}年';
+}
+
 String durationText(String value) {
   final minutes = int.tryParse(value);
   if (minutes == null) return value;

@@ -18,14 +18,6 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
-/// Registry key for app theme preference.
-///
-/// A value of 0 indicates apps should use dark mode. A non-zero or missing
-/// value indicates apps should use light mode.
-constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
-  L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
-constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
-
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
 
@@ -273,16 +265,15 @@ void Win32Window::OnDestroy() {
 }
 
 void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
-
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
-  }
+  // Match the application's fixed dark theme, including on light Windows desktops.
+  BOOL enable_dark_mode = TRUE;
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                       &enable_dark_mode, sizeof(enable_dark_mode));
+    // Keep the native frame (including Snap and DPI handling), only change colors.
+    const COLORREF caption = RGB(21, 25, 31);
+    const COLORREF text = RGB(226, 231, 239);
+    const COLORREF border = 0xFFFFFFFE;  // DWMWA_COLOR_NONE on Windows 11.
+    DwmSetWindowAttribute(window, 35, &caption, sizeof(caption));
+    DwmSetWindowAttribute(window, 36, &text, sizeof(text));
+    DwmSetWindowAttribute(window, 34, &border, sizeof(border));
 }

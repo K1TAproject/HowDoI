@@ -70,13 +70,8 @@ void main() {
     expect(budget.pending['JPY'], BigInt.from(8000));
     expect(budget.unknown, 1);
   });
-  test('dates, cross-zone duration, DST gaps and folds', () {
+  test('invalid calendar dates are rejected', () {
     expect(() => parseDate('2026-02-30'), throwsFormatException);
-    final a = localInstants('2026-10-15', '02:00', 'Asia/Shanghai').single;
-    final b = localInstants('2026-10-15', '06:00', 'Europe/Helsinki').single;
-    expect(b.difference(a).inHours, 9);
-    expect(localInstants('2026-03-08', '02:30', 'America/New_York'), isEmpty);
-    expect(localInstants('2026-11-01', '01:30', 'America/New_York').length, 2);
   });
   test('LWW conflicts, independent changes, tombstones, deleted parents', () {
     final a = Store(':memory:'), b = Store(':memory:');
@@ -171,7 +166,7 @@ void main() {
         y = a.save('item', itemData(t.id, 'B'));
     a.reorder(t.id, 1, [y.id, x.id]);
     final z = a.save('item', itemData(t.id, 'C'));
-    expect(a.dayItems(t.id, 1).map((r) => r.id), [y.id, x.id, z.id]);
+    expect(a.timeline(t.id, 1).map((r) => r.id), [y.id, x.id, z.id]);
   });
   test('TLS sync, auth rejection, repeat, deletion and reconnection', () async {
     HttpOverrides.global = null;

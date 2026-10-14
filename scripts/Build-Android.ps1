@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
+$version = ([regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s*(\d+\.\d+\.\d+)')).Groups[1].Value
+if (!$version) { throw 'pubspec.yaml 缺少版本号' }
 $javaHomeFile = Join-Path $projectRoot '.local/java-home.txt'
 $javaRoot = if (Test-Path -LiteralPath $javaHomeFile) { (Get-Content -LiteralPath $javaHomeFile -Raw).Trim() } else { $env:JAVA_HOME }
 if (!$javaRoot) { throw '请配置 JAVA_HOME 或 .local/java-home.txt（JDK 17 以上）。' }
@@ -22,4 +24,4 @@ if (!(Test-Path -LiteralPath $keyFile) -or !(Test-Path -LiteralPath $configFile)
 & "$PSScriptRoot/Flutter.ps1" build apk --release --target-platform android-arm64
 if ($LASTEXITCODE -ne 0) { throw 'Android 构建失败' }
 New-Item -ItemType Directory -Path dist -Force | Out-Null
-Copy-Item -LiteralPath build/app/outputs/flutter-apk/app-release.apk -Destination dist/HowDoI-0.1.0-android-arm64.apk -Force
+Copy-Item -LiteralPath build/app/outputs/flutter-apk/app-release.apk -Destination "dist/HowDoI-$version-android-arm64.apk" -Force

@@ -33,7 +33,7 @@ void main() {
       await loader.load();
     }
   });
-  for (final width in [1440, 390]) {
+  for (final width in [1440, 900, 390]) {
     testWidgets('Preview and detailed editor $width', (tester) async {
       tester.view.physicalSize = Size(width.toDouble(), 960);
       tester.view.devicePixelRatio = 1;
@@ -68,6 +68,17 @@ void main() {
       final stay = store.save('item', hotel);
       store.reorder(trip.id, 1, [plane.id, museum.id, stay.id]);
       final key = GlobalKey();
+      Future<void> capture(String name) => tester.runAsync(() async {
+        final image =
+            await (key.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary)
+                .toImage();
+        final png = await image.toByteData(format: ui.ImageByteFormat.png);
+        File(
+          'work/previews/$name-$width.png',
+        ).writeAsBytesSync(png!.buffer.asUint8List());
+        image.dispose();
+      });
       await tester.pumpWidget(
         RepaintBoundary(
           key: key,
@@ -108,6 +119,33 @@ void main() {
       await tester.tap(find.byTooltip('预算'));
       await tester.pumpAndSettle();
       expect(find.textContaining('1560.00 CNY'), findsWidgets);
+      await capture('budget');
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      if (width == 1440) {
+        await tester.tap(find.text('北京 → 赫尔辛基'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('选择出发时间'));
+        await tester.pumpAndSettle();
+        await capture('time');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('选择出发日期'));
+        await tester.pumpAndSettle();
+        await capture('calendar');
+        await tester.tap(find.text('取消').last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('关于 / 检查更新'));
+        await tester.pumpAndSettle();
+        await capture('about');
+        await tester.tap(find.text('关闭'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('旅行操作：北欧旅行'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('编辑旅行'));
+        await tester.pumpAndSettle();
+        await capture('settings');
+      }
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       sync.dispose();

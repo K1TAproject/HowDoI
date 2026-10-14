@@ -92,32 +92,6 @@ String dayDate(Map<String, dynamic> trip, int day) {
       : dateText(DateTime(start.year, start.month, start.day + day - 1));
 }
 
-List<DateTime> localInstants(String date, String time, String zone) {
-  final d = parseDate(date);
-  if (d == null || time.isEmpty || zone.isEmpty) return [];
-  if (!RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(time)) {
-    throw const FormatException('时间应为 HH:mm');
-  }
-  final t = time.split(':').map(int.parse).toList();
-  final location = tz.getLocation(zone);
-  final wall = DateTime.utc(d.year, d.month, d.day, t[0], t[1]);
-  final candidates = <DateTime>[];
-  // Checking the zone's actual offsets detects gaps and both sides of DST folds.
-  for (final offset in location.zones.map((z) => z.offset).toSet()) {
-    final utc = wall.subtract(Duration(milliseconds: offset));
-    final local = tz.TZDateTime.from(utc, location);
-    if (local.year == d.year &&
-        local.month == d.month &&
-        local.day == d.day &&
-        local.hour == t[0] &&
-        local.minute == t[1]) {
-      candidates.add(utc);
-    }
-  }
-  candidates.sort();
-  return candidates;
-}
-
 class Record {
   final String id, kind, device;
   final int modified;
@@ -273,6 +247,9 @@ void validateData(String kind, Map<String, dynamic> d) {
         throw const FormatException('排序无效');
       }
     } else {
+      if (d.containsKey('explicit') && d['explicit'] is! bool) {
+        throw const FormatException('日期显示标记无效');
+      }
       string('zone');
       tz.getLocation(d['zone']);
     }
@@ -287,8 +264,8 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
   if (m is! Map ||
       m['format'] != format ||
       (format == 'howdoi-sync'
-          ? m['version'] != 2
-          : ![1, 2].contains(m['version'])) ||
+          ? m['version'] != 3
+          : ![1, 2, 3].contains(m['version'])) ||
       m['records'] is! List ||
       m['records'].length > 20000) {
     throw const FormatException('不是受支持的 HowDoI 数据文件');

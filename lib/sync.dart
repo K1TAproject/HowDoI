@@ -161,6 +161,10 @@ class SyncService extends ChangeNotifier {
         return;
       }
       final text = await limitedBody(request);
+      if (!active) {
+        request.response.statusCode = 503;
+        return;
+      }
       if (request.uri.path == '/ack') {
         final ack = jsonDecode(text);
         final digest = sha256
@@ -179,10 +183,10 @@ class SyncService extends ChangeNotifier {
         return;
       }
       final envelope = jsonDecode(text);
-      if (envelope is Map && envelope['version'] != 2) {
+      if (envelope is Map && envelope['version'] != 3) {
         request.response.statusCode = 409;
-        request.response.write('数据版本不兼容，请使用支持 0.1.1 数据的客户端；未合并任何记录');
-        _status('旧版客户端不兼容 · 请勿与 0.1.0 同步');
+        request.response.write('数据版本不兼容，请使用支持 0.1.2 数据的客户端；未合并任何记录');
+        _status('旧版客户端不兼容 · 请更新两端版本');
         return;
       }
       final clock = envelope is Map ? envelope['sentAt'] : null;
@@ -313,6 +317,7 @@ class SyncService extends ChangeNotifier {
         store.setSetting('sync.peer', jsonEncode(peer));
         response = await _post('/sync', jsonEncode(snapshot));
       }
+      if (!active) return;
       final rows = decodeRecords(response, format: 'howdoi-sync');
       if (rows.any(
         (r) => r.modified > DateTime.now().microsecondsSinceEpoch + 300000000,

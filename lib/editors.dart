@@ -45,7 +45,6 @@ class Input extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         isDense: true,
-        border: const OutlineInputBorder(),
         alignLabelWithHint: true,
       ),
     ),
@@ -75,10 +74,7 @@ Widget choice<T>(
     initialValue: value,
     key: ValueKey('$label:$value'),
     isExpanded: true,
-    decoration: InputDecoration(
-      labelText: label,
-      border: const OutlineInputBorder(),
-    ),
+    decoration: InputDecoration(labelText: label),
     items: values
         .map(
           (v) => DropdownMenuItem(
@@ -108,31 +104,34 @@ Future<void> editTrip(BuildContext context, Store store, [Record? trip]) async {
         title: Text(trip == null ? '创建旅行' : '旅行设置'),
         content: SizedBox(
           width: 520,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Input('旅行名称 *', name),
-                PickField(
-                  '出发日期',
-                  start.text,
-                  onTap: () async {
-                    final v = await calendarDate(c, start.text);
-                    if (v != null && c.mounted) set(() => start.text = v);
-                  },
-                  onClear: () => set(start.clear),
-                ),
-                choice('主币种', base, currencies, (v) => set(() => base = v!)),
-                Input('旅行备注', note, lines: 3),
-                ExpansionTile(
-                  title: const Text('手动汇率'),
-                  subtitle: Text('1 单位外币 = 多少 $base；留空为待折算'),
-                  children: [
-                    for (final currency in currencies.where((v) => v != base))
-                      Input(currency, rates[currency]!),
-                  ],
-                ),
-              ],
+          height: (MediaQuery.sizeOf(c).height - 240).clamp(200.0, 480.0),
+          child: PickerRegion(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Input('旅行名称 *', name),
+                  PickField(
+                    '出发日期',
+                    start.text,
+                    onTap: (anchor) async {
+                      final v = await calendarDate(anchor, start.text);
+                      if (v != null && c.mounted) set(() => start.text = v);
+                    },
+                    onClear: () => set(start.clear),
+                  ),
+                  choice('主币种', base, currencies, (v) => set(() => base = v!)),
+                  Input('旅行备注', note, lines: 3),
+                  ExpansionTile(
+                    title: const Text('手动汇率'),
+                    subtitle: Text('1 单位外币 = 多少 $base；留空为待折算'),
+                    children: [
+                      for (final currency in currencies.where((v) => v != base))
+                        Input(currency, rates[currency]!),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -433,6 +432,7 @@ class ItemEditorState extends State<ItemEditor> {
         throw const FormatException('活动已在其他设备修改，请关闭后重新打开');
       }
       final d = value();
+      if (d['day'] == 0) throw const FormatException('请先为行程选择旅行日');
       if (d['booking'] == '已预订') {
         for (final end in [false, true]) {
           final key = end ? 'endDate' : 'startDate';
@@ -485,12 +485,8 @@ class ItemEditorState extends State<ItemEditor> {
     return PickField(
       label,
       duration ? durationText(controller.text) : controller.text,
-      onTap: () async {
-        final v = await clockValue(
-          context,
-          controller.text,
-          duration: duration,
-        );
+      onTap: (anchor) async {
+        final v = await clockValue(anchor, controller.text, duration: duration);
         if (v != null && mounted) {
           setState(() => controller.text = v);
         }
@@ -512,11 +508,12 @@ class ItemEditorState extends State<ItemEditor> {
     return PickField(
       label,
       value,
-      onTap: () async {
+      onTap: (anchor) async {
         final selected = await chooseDay(
-          context,
+          anchor,
           widget.trip.data,
           draft[dayKey],
+          existing: controller.text,
         );
         if (selected != null && mounted) {
           setState(() {
@@ -532,7 +529,7 @@ class ItemEditorState extends State<ItemEditor> {
       },
       onClear: () => setState(() {
         controller.clear();
-        draft[dayKey] = 0;
+        if (end) draft[dayKey] = 0;
       }),
     );
   }
@@ -704,144 +701,151 @@ class ItemEditorState extends State<ItemEditor> {
           ),
         ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              if (error != null)
-                Text(
-                  error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              choice(
-                '活动类型',
-                type,
-                editorTypes,
-                (v) => setState(() {
-                  draft['type'] = v!;
-                  if (v == '住宿' && draft['endDay'] <= draft['day']) {
-                    draft['endDay'] = 0;
-                    field('endDate').clear();
-                  }
-                }),
-              ),
-              ...main,
-              if (scheduled || stay || rental)
-                choice('预订状态', draft['booking'] as String, [
-                  '不适用',
-                  '待预订',
-                  '已预订',
-                ], (v) => setState(() => draft['booking'] = v!)),
-              if (dateWarning(widget.trip, value()).isNotEmpty)
-                Text(
-                  dateWarning(widget.trip, value()),
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              Input('备注', note, lines: 3),
-              ExpansionTile(
-                title: const Text('补充信息'),
-                children: [
-                  if (transport) Input('自定义名称（可空）', name),
-                  if (!scheduled &&
-                      !rental &&
-                      !stay &&
-                      (fieldText(draft, 'endTime').isNotEmpty ||
-                          fieldText(draft, 'endDate').isNotEmpty)) ...[
-                    date(true, '已有结束日期'),
-                    clock('endTime', '已有结束时间'),
-                  ],
-                  for (final e in extra.entries) detail(e.key, e.value),
-                  if (!mainKeys.contains('duration') &&
-                      field('duration').text.isNotEmpty)
-                    clock('duration', '已有预计时长', duration: true),
-                  if (!transport && !stay) ...[
-                    clock('reservationTime', '预约时间'),
-                    PickField(
-                      '预约日期',
-                      field('reservationDate').text,
-                      onTap: () async {
-                        final v = await calendarDate(
-                          context,
-                          field('reservationDate').text,
-                        );
-                        if (v != null && mounted) {
-                          setState(() => field('reservationDate').text = v);
-                        }
-                      },
-                      onClear: () => setState(field('reservationDate').clear),
+          child: PickerRegion(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                if (error != null)
+                  Text(
+                    error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
                     ),
-                    choice('预约状态', draft['booking'] as String, [
-                      '不适用',
-                      '待预订',
-                      '已预订',
-                    ], (v) => setState(() => draft['booking'] = v!)),
-                  ],
-                  if (transport)
-                    for (final end in [false, true])
-                      Builder(
-                        builder: (_) {
-                          final key = end ? 'toId' : 'fromId';
-                          final options = {
-                            '',
-                            field(key).text,
-                            ...links.map((r) => r.id),
-                          }.toList();
-                          return choice(
-                            end ? '从已有地点选择终点' : '从已有地点选择起点',
-                            field(key).text,
-                            options,
-                            (v) => setState(() {
-                              field(key).text = v!;
-                              final match = links
-                                  .where((r) => r.id == v)
-                                  .firstOrNull;
-                              if (match != null) {
-                                field(end ? 'destination' : 'origin').text =
-                                    itemTitle(match.data);
-                              }
-                            }),
-                            name: (v) => v == ''
-                                ? '不关联'
-                                : links.where((r) => r.id == v).firstOrNull ==
-                                      null
-                                ? '原地点已删除'
-                                : itemTitle(
-                                    links.firstWhere((r) => r.id == v).data,
-                                  ),
-                          );
-                        },
-                      ),
-                ],
-              ),
-              ExpansionTile(
-                title: const Text('预计预算'),
-                children: [
-                  TextButton.icon(
-                    onPressed: cost,
-                    icon: const Icon(Icons.add),
-                    label: const Text('增加费用'),
                   ),
-                  for (var i = 0; i < (draft['costs'] as List).length; i++)
-                    ListTile(
-                      title: Text(
-                        '${draft['costs'][i]['label']} · ${draft['costs'][i]['amount']} ${draft['costs'][i]['currency']}',
-                      ),
-                      onTap: () => cost(i),
-                      trailing: IconButton(
-                        tooltip: '移除费用',
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () =>
-                            setState(() => draft['costs'].removeAt(i)),
-                      ),
+                choice(
+                  '活动类型',
+                  type,
+                  editorTypes,
+                  (v) => setState(() {
+                    draft['type'] = v!;
+                    if (v == '住宿' && draft['endDay'] <= draft['day']) {
+                      draft['endDay'] = 0;
+                      field('endDate').clear();
+                    }
+                  }),
+                ),
+                ...main,
+                if (scheduled || stay || rental)
+                  choice('预订状态', draft['booking'] as String, [
+                    '不适用',
+                    '待预订',
+                    '已预订',
+                  ], (v) => setState(() => draft['booking'] = v!)),
+                if (dateWarning(widget.trip, value()).isNotEmpty)
+                  Text(
+                    dateWarning(widget.trip, value()),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
                     ),
-                ],
-              ),
-              SwitchListTile(
-                title: const Text('已完成'),
-                value: draft['done'],
-                onChanged: (v) => setState(() => draft['done'] = v),
-              ),
-              const SizedBox(height: 16),
-            ],
+                  ),
+                Input('备注', note, lines: 3),
+                ExpansionTile(
+                  title: const Text('补充信息'),
+                  children: [
+                    if (transport) Input('自定义名称（可空）', name),
+                    if (!scheduled &&
+                        !rental &&
+                        !stay &&
+                        (fieldText(draft, 'endTime').isNotEmpty ||
+                            fieldText(draft, 'endDate').isNotEmpty)) ...[
+                      date(true, '已有结束日期'),
+                      clock('endTime', '已有结束时间'),
+                    ],
+                    for (final e in extra.entries) detail(e.key, e.value),
+                    if (!mainKeys.contains('duration') &&
+                        field('duration').text.isNotEmpty)
+                      clock('duration', '已有预计时长', duration: true),
+                    if (!transport && !stay) ...[
+                      clock('reservationTime', '预约时间'),
+                      PickField(
+                        '预约日期',
+                        field('reservationDate').text,
+                        onTap: (anchor) async {
+                          final v = await calendarDate(
+                            anchor,
+                            field('reservationDate').text,
+                            fallback: dayDate(widget.trip.data, draft['day']),
+                          );
+                          if (v != null && mounted) {
+                            setState(() => field('reservationDate').text = v);
+                          }
+                        },
+                        onClear: () => setState(field('reservationDate').clear),
+                      ),
+                      choice('预约状态', draft['booking'] as String, [
+                        '不适用',
+                        '待预订',
+                        '已预订',
+                      ], (v) => setState(() => draft['booking'] = v!)),
+                    ],
+                    if (transport)
+                      for (final end in [false, true])
+                        Builder(
+                          builder: (_) {
+                            final key = end ? 'toId' : 'fromId';
+                            final options = {
+                              '',
+                              field(key).text,
+                              ...links.map((r) => r.id),
+                            }.toList();
+                            return choice(
+                              end ? '从已有地点选择终点' : '从已有地点选择起点',
+                              field(key).text,
+                              options,
+                              (v) => setState(() {
+                                field(key).text = v!;
+                                final match = links
+                                    .where((r) => r.id == v)
+                                    .firstOrNull;
+                                if (match != null) {
+                                  field(end ? 'destination' : 'origin').text =
+                                      itemTitle(match.data);
+                                }
+                              }),
+                              name: (v) => v == ''
+                                  ? '不关联'
+                                  : links.where((r) => r.id == v).firstOrNull ==
+                                        null
+                                  ? '原地点已删除'
+                                  : itemTitle(
+                                      links.firstWhere((r) => r.id == v).data,
+                                    ),
+                            );
+                          },
+                        ),
+                  ],
+                ),
+                ExpansionTile(
+                  title: const Text('预计预算'),
+                  children: [
+                    TextButton.icon(
+                      onPressed: cost,
+                      icon: const Icon(Icons.add),
+                      label: const Text('增加费用'),
+                    ),
+                    for (var i = 0; i < (draft['costs'] as List).length; i++)
+                      ListTile(
+                        title: Text(
+                          '${draft['costs'][i]['label']} · ${draft['costs'][i]['amount']} ${draft['costs'][i]['currency']}',
+                        ),
+                        onTap: () => cost(i),
+                        trailing: IconButton(
+                          tooltip: '移除费用',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () =>
+                              setState(() => draft['costs'].removeAt(i)),
+                        ),
+                      ),
+                  ],
+                ),
+                SwitchListTile(
+                  title: const Text('已完成'),
+                  value: draft['done'],
+                  onChanged: (v) => setState(() => draft['done'] = v),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         ),
         Padding(
