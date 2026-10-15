@@ -42,6 +42,17 @@ void main() {
       final store = Store(':memory:');
       final sync = SyncService(store, host: true);
       final trip = store.save('trip', tripData());
+      store.savePreparations(trip, [
+        {
+          'id': 'p1',
+          'name': '检查护照有效期',
+          'due': '2026-10-01',
+          'note': '确认入境要求',
+          'done': false,
+        },
+        {'id': 'p2', 'name': '购买旅行保险', 'due': '', 'note': '', 'done': false},
+        {'id': 'p3', 'name': '预订机票', 'due': '', 'note': '', 'done': true},
+      ]);
       final flight = itemData(trip.id, '飞往赫尔辛基', type: '航班');
       flight['fields'] = {
         'startTime': '02:00',
@@ -146,6 +157,24 @@ void main() {
         await tester.pumpAndSettle();
         await capture('settings');
       }
+      if (width == 1440) {
+        Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+        await tester.pumpAndSettle();
+      }
+      if (width < 800) {
+        await tester.tap(find.byIcon(Icons.menu));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('预备工作'));
+      await tester.pumpAndSettle();
+      if (width < 800) {
+        Navigator.of(tester.element(find.byType(Drawer))).pop();
+        await tester.pumpAndSettle();
+      }
+      await capture('preparations');
+      await tester.tap(find.text('检查护照有效期'));
+      await tester.pumpAndSettle();
+      await capture('preparation-editor');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       sync.dispose();

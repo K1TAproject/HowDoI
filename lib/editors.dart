@@ -141,6 +141,7 @@ Future<void> editTrip(BuildContext context, Store store, [Record? trip]) async {
                   throw const FormatException('旅行已在其他设备修改，请重新打开设置');
                 }
                 store.save('trip', {
+                  ...d,
                   'name': name.text.trim(),
                   'days': d['days'] ?? 1,
                   'start': start.text.trim(),

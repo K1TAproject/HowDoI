@@ -516,7 +516,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '当前版本：${version.isEmpty ? '读取中' : version}',
+                '当前版本：${version.isEmpty ? '读取中' : 'v${version.split('+').first}'}',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 12),

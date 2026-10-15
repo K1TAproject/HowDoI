@@ -74,6 +74,17 @@ String durationText(String value) {
   return '${minutes >= 60 ? '${minutes ~/ 60}小时' : ''}${minutes % 60 != 0 || minutes == 0 ? '${minutes % 60}分钟' : ''}';
 }
 
+String itemBudgetText(Record trip, Record item, {bool whole = false}) {
+  if ((item.data['costs'] as List).isEmpty) return '';
+  final budget = Budget(trip, [item]);
+  if (budget.byCurrency.isEmpty) return whole ? '整条行程预算未估算' : '预算未估算';
+  final values = [
+    for (final c in currencies.where(budget.byCurrency.containsKey))
+      '$c ${formatUnits(budget.byCurrency[c]!, digits(c))}',
+  ];
+  return '${whole ? '整条行程预算' : '预计'}：${values.join(' · ')}${budget.unknown > 0 ? ' · 含未估算' : ''}';
+}
+
 String dateWarning(Record trip, Map<String, dynamic> d) {
   final warnings = <String>[];
   for (final end in [false, true]) {

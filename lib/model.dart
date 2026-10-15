@@ -172,6 +172,25 @@ void validateData(String kind, Map<String, dynamic> d) {
       throw const FormatException('旅行名称或币种无效');
     }
     parseDate(d['start']);
+    if (d.containsKey('preparations')) {
+      if (d['preparations'] is! List) throw const FormatException('准备清单无效');
+      final ids = <String>{};
+      for (final p in d['preparations']) {
+        if (p is! Map ||
+            p['id'] is! String ||
+            !ids.add(p['id']) ||
+            p['name'] is! String ||
+            (p['name'] as String).trim().isEmpty ||
+            (p['name'] as String).length > 200 ||
+            p['note'] is! String ||
+            (p['note'] as String).length > 10000 ||
+            p['due'] is! String ||
+            p['done'] is! bool) {
+          throw const FormatException('准备事项名称或字段无效');
+        }
+        parseDate(p['due']);
+      }
+    }
     tz.getLocation(d['zone']);
     if (d['rates'] is! Map) throw const FormatException('汇率无效');
     for (final e in (d['rates'] as Map).entries) {

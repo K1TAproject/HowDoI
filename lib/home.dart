@@ -11,6 +11,7 @@ import 'planner.dart';
 import 'pickers.dart';
 import 'updates.dart';
 import 'day_actions.dart';
+import 'preparations.dart';
 
 class Home extends StatefulWidget {
   final Store store;
@@ -24,12 +25,21 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   String? tripId, editId;
   int day = 1;
   bool editing = false;
+  bool preparing = false, editingPreparation = false;
+  GlobalKey<PreparationEditorState> preparationKey =
+      GlobalKey<PreparationEditorState>();
+  final preparationListKey = GlobalKey<PreparationListState>();
   bool showingUpdates = false;
   GlobalKey<ItemEditorState> editorKey = GlobalKey<ItemEditorState>();
   final expandedNotes = <String>{};
   static const windowChannel = MethodChannel('howdoi/window');
-  Future<bool> leaveEditor() async =>
-      await editorKey.currentState?.mayLeave() ?? true;
+  Future<bool> leaveEditor({bool includeQuick = true}) async {
+    if (!(await preparationKey.currentState?.mayLeave() ?? true)) return false;
+    if (!(await editorKey.currentState?.mayLeave() ?? true)) return false;
+    return !includeQuick ||
+        (await preparationListKey.currentState?.mayLeave() ?? true);
+  }
+
   Store get store => widget.store;
   @override
   void initState() {
@@ -70,6 +80,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (!await leaveEditor() || !mounted) return;
     setState(() {
       day = value;
+      preparing = false;
       editing = false;
     });
     store.setSetting('selectedDay', '$day');
@@ -96,6 +107,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (!await leaveEditor() || !mounted) return;
     setState(() {
       tripId = trip.id;
+      preparing = false;
       editing = false;
       final start = parseDate(trip.data['start']);
       final now = DateTime.now();
@@ -154,6 +166,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   Future<void> openEditor(Record trip, Record? item, bool wide) async {
     if (!await leaveEditor() || !mounted) return;
+    editingPreparation = false;
     editorKey = GlobalKey<ItemEditorState>();
     if (wide) {
       setState(() {
@@ -185,6 +198,58 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       );
     }
   }
+
+  Future<void> openPreparation(Record trip, String id, bool wide) async {
+    if (!await leaveEditor() || !mounted) return;
+    final current = store.get(trip.id)!;
+    preparationKey = GlobalKey<PreparationEditorState>();
+    editingPreparation = true;
+    if (wide) {
+      setState(() {
+        editId = id;
+        editing = true;
+      });
+    } else {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (c) => PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, _) async {
+              if (!didPop && await leaveEditor() && c.mounted) Navigator.pop(c);
+            },
+            child: Scaffold(
+              body: SafeArea(
+                child: PreparationEditor(
+                  key: preparationKey,
+                  store: store,
+                  trip: current,
+                  id: id,
+                  onClose: () => Navigator.pop(c),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget activeEditor(Record trip) => editingPreparation
+      ? PreparationEditor(
+          key: preparationKey,
+          store: store,
+          trip: trip,
+          id: editId!,
+          onClose: () => setState(() => editing = false),
+        )
+      : ItemEditor(
+          key: editorKey,
+          store: store,
+          trip: trip,
+          day: day,
+          item: editId == null ? null : store.get(editId!),
+          onClose: () => setState(() => editing = false),
+        );
 
   void showBudget(Record trip) {
     final b = Budget(trip, store.items(trip.id));
@@ -427,11 +492,25 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               if (mounted) notice(context, e);
             }
           }),
+          _NavigationCard(
+            title: '预备工作',
+            subtitle:
+                '${store.preparations(trip).where((p) => p['done'] == true).length}/${store.preparations(trip).length}',
+            selected: preparing,
+            menu: const SizedBox(width: 12),
+            onTap: () async {
+              if (!await leaveEditor() || !mounted) return;
+              setState(() {
+                preparing = true;
+                editing = false;
+              });
+            },
+          ),
           for (final i in store.visibleDays(trip.id))
             _NavigationCard(
               title: dayTitle(trip, i),
               subtitle: daySubtitle(trip, i),
-              selected: day == i,
+              selected: !preparing && day == i,
               onTap: () => selectDay(i),
               menu: PopupMenuButton<String>(
                 tooltip: '日期操作：第 $i 天',
@@ -477,7 +556,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     return '';
   }
 
-  Widget itemCard(PlanNode node, Record trip, bool wide, {String? hour}) {
+  Widget itemCard(
+    PlanNode node,
+    Record trip,
+    bool wide, {
+    String? hour,
+    int? dragIndex,
+  }) {
     final r = node.item, d = r.data;
     final type = itemType(d), f = d['fields'] as Map;
     final warning = [
@@ -552,6 +637,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       info.add('预约信息：${f['reservation']}');
     }
     if (d['booking'] != '不适用') info.add(d['booking']);
+    final budgetText = itemBudgetText(
+      trip,
+      r,
+      whole: node.stay || node.end || d['endDay'] != d['day'],
+    );
     return Padding(
       key: ValueKey(node.id),
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -570,101 +660,149 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               ),
             ),
           Card(
+            key: ValueKey('card:${node.id}'),
             margin: EdgeInsets.zero,
-            child: InkWell(
-              onTap: () => openEditor(trip, r, wide),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 12, 32, 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: wide ? 78 : 56,
-                      child: Column(
-                        children: [
-                          Text(
-                            node.stay
-                                ? '住宿'
-                                : node.time.isEmpty
-                                ? '—'
-                                : node.time,
-                            style: TextStyle(
-                              fontSize: wide ? 17 : 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          if (node.appointment)
-                            const Text('预约', style: TextStyle(fontSize: 11)),
-                          Checkbox(
-                            value: d['done'],
-                            onChanged: (v) {
-                              store.save('item', {...d, 'done': v}, id: r.id);
-                            },
-                          ),
-                        ],
-                      ),
+            child: Stack(
+              children: [
+                InkWell(
+                  onTap: () => openEditor(trip, r, wide),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      8,
+                      12,
+                      dragIndex == null ? 12 : 52,
+                      12,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${node.prefix}${itemTitle(d)}',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                              decoration: d['done']
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                            ),
-                          ),
-                          Text(
-                            type,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                          for (final line in info.where((s) => s.isNotEmpty))
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Text(line),
-                            ),
-                          if ((d['note'] as String).isNotEmpty)
-                            InkWell(
-                              onTap: () => setState(() {
-                                if (!expandedNotes.add(r.id)) {
-                                  expandedNotes.remove(r.id);
-                                }
-                              }),
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 6),
-                                child: Text(
-                                  '备注 · ${d['note']}',
-                                  maxLines: expandedNotes.contains(r.id)
-                                      ? null
-                                      : 1,
-                                  overflow: expandedNotes.contains(r.id)
-                                      ? null
-                                      : TextOverflow.ellipsis,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: wide ? 78 : 56,
+                          child: Column(
+                            children: [
+                              Text(
+                                node.stay
+                                    ? '住宿'
+                                    : node.time.isEmpty
+                                    ? '—'
+                                    : node.time,
+                                style: TextStyle(
+                                  fontSize: wide ? 17 : 14,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                            ),
-                          if (warning.isNotEmpty)
-                            Text(
-                              warning,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
+                              if (node.appointment)
+                                const Text(
+                                  '预约',
+                                  style: TextStyle(fontSize: 11),
+                                ),
+                              Checkbox(
+                                value: d['done'],
+                                onChanged: (v) {
+                                  store.save('item', {
+                                    ...d,
+                                    'done': v,
+                                  }, id: r.id);
+                                },
                               ),
-                            ),
-                        ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${node.prefix}${itemTitle(d)}',
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w600,
+                                  decoration: d['done']
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                              Text(
+                                type,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                              for (final line in info.where(
+                                (s) => s.isNotEmpty,
+                              ))
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Text(line),
+                                ),
+                              if (budgetText.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    budgetText,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              if ((d['note'] as String).isNotEmpty)
+                                InkWell(
+                                  onTap: () => setState(() {
+                                    if (!expandedNotes.add(r.id)) {
+                                      expandedNotes.remove(r.id);
+                                    }
+                                  }),
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      '备注 · ${d['note']}',
+                                      maxLines: expandedNotes.contains(r.id)
+                                          ? null
+                                          : 1,
+                                      overflow: expandedNotes.contains(r.id)
+                                          ? null
+                                          : TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              if (warning.isNotEmpty)
+                                Text(
+                                  warning,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (dragIndex != null)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: ReorderableDragStartListener(
+                        index: dragIndex,
+                        key: ValueKey('drag:${node.id}'),
+                        child: const SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Icon(Icons.drag_handle, semanticLabel: '拖动行程'),
+                        ),
                       ),
                     ),
-                  ],
-                ),
-              ),
+                  ),
+              ],
             ),
           ),
         ],
@@ -709,7 +847,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         ),
         Expanded(
           child: ReorderableListView.builder(
-            buildDefaultDragHandles: true,
+            buildDefaultDragHandles: false,
             itemCount: rows.length,
             header: rows.isEmpty
                 ? const Padding(
@@ -751,6 +889,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 trip,
                 wide,
                 hour: hour != previous ? hour : null,
+                dragIndex: i,
               );
             },
             onReorderItem: (a, b) {
@@ -918,13 +1057,21 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                               ),
                             )
                           : editing && !wide
-                          ? ItemEditor(
-                              key: editorKey,
+                          ? activeEditor(trip)
+                          : preparing
+                          ? PreparationList(
+                              key: preparationListKey,
                               store: store,
                               trip: trip,
-                              day: day,
-                              item: editId == null ? null : store.get(editId!),
-                              onClose: () => setState(() => editing = false),
+                              beforeChange: () async {
+                                if (!await leaveEditor(includeQuick: false) ||
+                                    !mounted) {
+                                  return false;
+                                }
+                                setState(() => editing = false);
+                                return true;
+                              },
+                              onEdit: (id) => openPreparation(trip, id, wide),
                             )
                           : itinerary(trip, wide),
                     ),
@@ -936,14 +1083,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                           color: Theme.of(
                             context,
                           ).colorScheme.surfaceContainerLow,
-                          child: ItemEditor(
-                            key: editorKey,
-                            store: store,
-                            trip: trip,
-                            day: day,
-                            item: editId == null ? null : store.get(editId!),
-                            onClose: () => setState(() => editing = false),
-                          ),
+                          child: activeEditor(trip),
                         ),
                       ),
                     ],
@@ -952,7 +1092,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               ),
             ],
           ),
-          floatingActionButton: trip == null || day == 0 || editing
+          floatingActionButton: trip == null || day == 0 || editing || preparing
               ? null
               : FloatingActionButton.extended(
                   onPressed: () => openEditor(trip, null, wide),

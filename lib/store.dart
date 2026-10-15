@@ -71,6 +71,22 @@ class Store extends ChangeNotifier {
         )
         .map((r) => r.data['day'] as int),
   }.toList()..sort());
+
+  List<Map<String, dynamic>> preparations(Record trip) => [
+    for (final p in trip.data['preparations'] as List? ?? [])
+      Map<String, dynamic>.from(p),
+  ];
+
+  void savePreparations(Record trip, List<Map<String, dynamic>> entries) {
+    final current = get(trip.id);
+    if (current == null ||
+        current.deleted ||
+        current.modified != trip.modified) {
+      throw const FormatException('旅行或准备清单已改变，请重新打开后编辑');
+    }
+    save('trip', {...current.data, 'preparations': entries}, id: trip.id);
+  }
+
   int addDay(Record trip) {
     final day = (visibleDays(trip.id).lastOrNull ?? 0) + 1;
     save('day', {
