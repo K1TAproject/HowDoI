@@ -118,7 +118,7 @@ void main() {
       expect(store.get(plane.id)!.data['fields']['startDate'], '2026-10-11');
       await tester.tap(find.byTooltip('预算'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('1560.00 CNY'), findsWidgets);
+      expect(find.text('200.00'), findsWidgets);
       await capture('budget');
       await tester.tap(find.text('关闭'));
       await tester.pumpAndSettle();

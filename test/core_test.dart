@@ -66,8 +66,8 @@ void main() {
       },
     ];
     final budget = Budget(trip, [Record('i', 'item', 'a', 1, false, item)]);
-    expect(budget.total, BigInt.from(78000));
-    expect(budget.pending['JPY'], BigInt.from(8000));
+    expect(budget.byCurrency['EUR'], BigInt.from(10000));
+    expect(budget.byCurrency['JPY'], BigInt.from(8000));
     expect(budget.unknown, 1);
   });
   test('invalid calendar dates are rejected', () {

@@ -63,7 +63,7 @@ void main() {
         'fields': {'startTime': '10:00'},
       });
       final other = store.save('item', itemData(trip.id, '不改变', day: 9));
-      final budget = Budget(trip, store.items(trip.id)).total;
+      final budget = Budget(trip, store.items(trip.id)).byCurrency;
       store.changeDay(trip, 1, target: 4, expectedGeneration: store.generation);
       expect(store.timeline(trip.id, 4).map((n) => n.id), [
         early.id,
@@ -75,7 +75,7 @@ void main() {
       expect(store.get(booked.id)!.data['fields'], booked.data['fields']);
       expect(dateWarning(trip, store.get(booked.id)!.data), contains('请确认'));
       expect(store.get(other.id)!.toJson(), other.toJson());
-      expect(Budget(trip, store.items(trip.id)).total, budget);
+      expect(Budget(trip, store.items(trip.id)).byCurrency, budget);
       expect(store.visibleDays(trip.id), [4, 5, 9]);
       final copy = Store(':memory:');
       copy.importCopy(decodeRecords(store.export()));

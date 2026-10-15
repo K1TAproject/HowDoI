@@ -19,13 +19,18 @@ Future<int?> changeTravelDay(
   if (deleting && primary.isEmpty && related.isEmpty) {
     store.changeDay(trip, source, expectedGeneration: generation);
     final removed = store.get('day:${trip.id}:$source')!;
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.removeCurrentSnackBar();
+    messenger.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 7),
+        persist: false,
         content: Text('已删除 ${dayLabel(trip, source)}'),
         action: SnackBarAction(
           label: '撤销',
           onPressed: () {
+            messenger.removeCurrentSnackBar();
             try {
               store.undoEmptyDay(removed);
               onUndo();

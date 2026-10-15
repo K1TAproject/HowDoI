@@ -93,10 +93,6 @@ Future<void> editTrip(BuildContext context, Store store, [Record? trip]) async {
   final start = TextEditingController(text: d['start'] ?? '');
   final note = TextEditingController(text: d['note'] ?? '');
   var base = d['base'] as String? ?? 'CNY';
-  final rates = {
-    for (final c in currencies)
-      c: TextEditingController(text: (d['rates'] as Map? ?? {})[c] ?? ''),
-  };
   await formDialog<void>(
     context: context,
     builder: (dialog) => StatefulBuilder(
@@ -120,16 +116,13 @@ Future<void> editTrip(BuildContext context, Store store, [Record? trip]) async {
                     },
                     onClear: () => set(start.clear),
                   ),
-                  choice('主币种', base, currencies, (v) => set(() => base = v!)),
-                  Input('旅行备注', note, lines: 3),
-                  ExpansionTile(
-                    title: const Text('手动汇率'),
-                    subtitle: Text('1 单位外币 = 多少 $base；留空为待折算'),
-                    children: [
-                      for (final currency in currencies.where((v) => v != base))
-                        Input(currency, rates[currency]!),
-                    ],
+                  choice(
+                    '默认预算币种',
+                    base,
+                    currencies,
+                    (v) => set(() => base = v!),
                   ),
+                  Input('旅行备注', note, lines: 3),
                 ],
               ),
             ),
@@ -154,11 +147,7 @@ Future<void> editTrip(BuildContext context, Store store, [Record? trip]) async {
                   'base': base,
                   'zone': d['zone'] ?? 'Asia/Shanghai',
                   'note': note.text,
-                  'rates': {
-                    for (final e in rates.entries)
-                      if (e.key != base && e.value.text.trim().isNotEmpty)
-                        e.key: e.value.text.trim(),
-                  },
+                  'rates': d['rates'] ?? <String, dynamic>{},
                 }, id: trip?.id);
                 Navigator.pop(c);
               } catch (e) {
@@ -171,7 +160,7 @@ Future<void> editTrip(BuildContext context, Store store, [Record? trip]) async {
       ),
     ),
   );
-  for (final x in [name, start, note, ...rates.values]) {
+  for (final x in [name, start, note]) {
     x.dispose();
   }
 }

@@ -83,14 +83,14 @@ void main() {
           true,
         );
       }
-      final budget = Budget(trip, store.items(trip.id)).total;
+      final budget = Budget(trip, store.items(trip.id)).byCurrency;
       expect(() => store.assignDay(item, 5), throwsFormatException);
       store.assignDay(item, 5, endDay: 7);
       final changed = store.get(item.id)!;
       expect(changed.data['day'], 5);
       expect(changed.data['fields'], item.data['fields']);
       expect(changed.data['costs'], item.data['costs']);
-      expect(Budget(trip, store.items(trip.id)).total, budget);
+      expect(Budget(trip, store.items(trip.id)).byCurrency, budget);
       expect(store.visibleDays(trip.id), [5, 6]);
       expect(dayDate(trip.data, 5), '');
       expect(() => store.assignDay(item, 6), throwsFormatException);

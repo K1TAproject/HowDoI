@@ -278,13 +278,10 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
 }
 
 class Budget {
-  BigInt total = BigInt.zero;
-  final byCategory = <String, BigInt>{};
-  final pending = <String, BigInt>{};
+  final byCurrency = <String, BigInt>{};
+  final byCategory = <String, Map<String, BigInt>>{};
   int unknown = 0;
   Budget(Record trip, Iterable<Record> items) {
-    final base = trip.data['base'] as String;
-    final rates = trip.data['rates'] as Map;
     for (final item in items) {
       if ((item.data['costs'] as List).isEmpty) unknown++;
       for (final c in item.data['costs']) {
@@ -293,17 +290,13 @@ class Budget {
           continue;
         }
         final currency = c['currency'] as String;
-        final rate = currency == base ? '1' : rates[currency] as String?;
-        if (rate == null) {
-          pending[currency] =
-              (pending[currency] ?? BigInt.zero) +
-              decimalUnits(c['amount'], digits(currency));
-        } else {
-          final amount = convertAmount(c['amount'], currency, rate, base);
-          total += amount;
-          byCategory[c['category']] =
-              (byCategory[c['category']] ?? BigInt.zero) + amount;
-        }
+        final amount = decimalUnits(c['amount'], digits(currency));
+        byCurrency[currency] = (byCurrency[currency] ?? BigInt.zero) + amount;
+        final subtotal = byCategory.putIfAbsent(
+          c['category'],
+          () => <String, BigInt>{},
+        );
+        subtotal[currency] = (subtotal[currency] ?? BigInt.zero) + amount;
       }
     }
   }

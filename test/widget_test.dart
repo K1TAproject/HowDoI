@@ -133,7 +133,7 @@ void main() {
       expect(store.items(trip.id).single.data['day'], 2);
       await tester.tap(find.byTooltip('关于 / 检查更新'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('当前版本：0.1.3+4'), findsOneWidget);
+      expect(find.textContaining('当前版本：0.1.4+5'), findsOneWidget);
       expect(
         Theme.of(tester.element(find.text('检查更新'))).brightness,
         Brightness.dark,

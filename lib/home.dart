@@ -188,11 +188,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   void showBudget(Record trip) {
     final b = Budget(trip, store.items(trip.id));
-    final currency = trip.data['base'];
     showDialog<void>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('旅行预算'),
+        title: const Text('预计预算'),
         content: SizedBox(
           width: 440,
           child: SingleChildScrollView(
@@ -200,24 +199,35 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  '${b.pending.isEmpty ? '预计总额' : '已折算部分'}：${formatUnits(b.total, digits(currency))} $currency',
-                  style: Theme.of(c).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                for (final category in categories)
+                if (b.byCurrency.isEmpty) const Text('尚无已填写金额的预算'),
+                for (final currency in currencies.where(
+                  b.byCurrency.containsKey,
+                ))
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: Text(category),
+                    title: Text(currency),
                     trailing: Text(
-                      '${formatUnits(b.byCategory[category] ?? BigInt.zero, digits(currency))} $currency',
+                      formatUnits(b.byCurrency[currency]!, digits(currency)),
                     ),
                   ),
-                if (b.pending.isNotEmpty) ...[
-                  const Divider(),
-                  const Text('待折算（请在旅行设置填写汇率）'),
-                  for (final e in b.pending.entries)
-                    Text('${e.key} ${formatUnits(e.value, digits(e.key))}'),
+                const SizedBox(height: 16),
+                for (final category in categories.where(
+                  b.byCategory.containsKey,
+                )) ...[
+                  Text(category, style: Theme.of(c).textTheme.titleMedium),
+                  for (final currency in currencies.where(
+                    b.byCategory[category]!.containsKey,
+                  ))
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(currency),
+                      trailing: Text(
+                        formatUnits(
+                          b.byCategory[category]![currency]!,
+                          digits(currency),
+                        ),
+                      ),
+                    ),
                 ],
                 Text('未估算：${b.unknown} 项'),
                 const SizedBox(height: 8),
@@ -361,6 +371,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       child: OutlinedButton.icon(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size.fromHeight(42),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           alignment: Alignment.centerLeft,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -403,7 +414,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           }
         }),
         if (trip != null) ...[
-          const SizedBox(height: 20),
           action('添加日期', () async {
             if (!await leaveEditor() || !mounted) return;
             try {
