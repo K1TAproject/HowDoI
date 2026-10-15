@@ -102,7 +102,11 @@ class ReleaseClient {
     return bytes;
   }
 
-  Future<UpdateCheck> check(String current) async {
+  Future<UpdateCheck> check(
+    String current, {
+    bool installed = false,
+    bool repairCurrent = false,
+  }) async {
     final client = HttpClient();
     try {
       final response = await request(client, api);
@@ -126,10 +130,13 @@ class ReleaseClient {
         RegExp(r'^v'),
         '',
       );
-      if (compareVersions(version, current) <= 0) {
+      if (compareVersions(version, current) <= 0 &&
+          !(repairCurrent &&
+              version.split('+').first == current.split('+').first)) {
         return UpdateCheck('没有更新版本。当前 $current，最新正式发布 $version。');
       }
-      final name = 'HowDoI-${version.split('+').first}-windows-x64.zip';
+      final suffix = installed ? '-setup.exe' : '.zip';
+      final name = 'HowDoI-${version.split('+').first}-windows-x64$suffix';
       final asset = (raw['assets'] as List)
           .whereType<Map>()
           .where((a) => a['name'] == name)
@@ -183,7 +190,9 @@ class ReleaseClient {
         digest = matches.single!.group(1)!;
       }
       return UpdateCheck(
-        '发现新版本 $version',
+        repairCurrent && compareVersions(version, current) <= 0
+            ? '可将 $version 安装到原位置，修复旧更新目录留下的快捷方式问题'
+            : '发现新版本 $version',
         AppRelease(version, name, url, digest.toLowerCase(), size),
       );
     } finally {
@@ -197,7 +206,8 @@ class ReleaseClient {
     ValueChanged<double> progress,
   ) async {
     final client = HttpClient();
-    final file = File('${folder.path}/package-${uuid.v4()}.zip');
+    final suffix = release.name.endsWith('.exe') ? '.exe' : '.zip';
+    final file = File('${folder.path}/package-${uuid.v4()}$suffix');
     IOSink? sink;
     try {
       await folder.create(recursive: true);
@@ -350,9 +360,88 @@ Future<void> probeRelease(String exe, String backup, String folder) async {
   }
 }
 
+// Only a registered/shortcut installation, or a legacy staged update of it,
+// uses the installer. An unrelated portable copy must remain portable.
+String? installedUpdateTarget(
+  String currentExe,
+  String updates,
+  List<String> candidates,
+) {
+  String normalize(String p) =>
+      p.replaceAll('\\', '/').replaceFirst(RegExp(r'/+$'), '').toLowerCase();
+  final current = normalize(File(currentExe).parent.path);
+  final paths = {for (final p in candidates) normalize(p): p};
+  if (paths.containsKey(current)) return paths[current];
+  if (current.startsWith('${normalize(updates)}/versions/')) {
+    if (paths.length > 1) {
+      throw const FormatException('发现多个原安装目录，请先核对桌面和开始菜单入口');
+    }
+    return paths.values.firstOrNull;
+  }
+  return null;
+}
+
+Future<File> writeUpdateHelper(Directory folder) async {
+  await folder.create(recursive: true);
+  return File('${folder.path}/update-${uuid.v4()}.ps1').writeAsString(
+    '\ufeff${await rootBundle.loadString('assets/windows-update.ps1')}',
+    flush: true,
+  );
+}
+
+Future<void> handOffInstaller({
+  required Directory folder,
+  required File helper,
+  required File package,
+  required AppRelease release,
+  required String target,
+  required Store store,
+}) async {
+  final backup = '${folder.path}/before-${uuid.v4()}.db';
+  store.snapshot(backup);
+  final ready = File('${folder.path}/helper-ready-${uuid.v4()}');
+  final job = File('${folder.path}/job-${uuid.v4()}.json');
+  await job.writeAsString(
+    jsonEncode({
+      'package': package.absolute.path,
+      'sha': release.sha256sum,
+      'version': release.version,
+      'target': target,
+      'databaseBackup': backup,
+      'currentExe': Platform.resolvedExecutable,
+      'parentId': pid,
+      'ready': ready.path,
+      'result': '${folder.path}/installer-result.json',
+    }),
+    flush: true,
+  );
+  final process = await Process.start('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-WindowStyle',
+    'Hidden',
+    '-File',
+    helper.path,
+    '-Job',
+    job.path,
+  ], mode: ProcessStartMode.detached);
+  for (var i = 0; i < 100; i++) {
+    if (await ready.exists()) {
+      await ready.delete();
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  Process.killPid(process.pid);
+  throw StateError('安装助手未就绪，当前程序未关闭');
+}
+
 class UpdateDialog extends StatefulWidget {
   final Store store;
-  const UpdateDialog({super.key, required this.store});
+  final Future<bool> Function()? beforeInstall;
+  const UpdateDialog({super.key, required this.store, this.beforeInstall});
   @override
   State<UpdateDialog> createState() => _UpdateDialogState();
 }
@@ -360,33 +449,90 @@ class UpdateDialog extends StatefulWidget {
 class _UpdateDialogState extends State<UpdateDialog> {
   String version = '', status = '读取版本信息…';
   AppRelease? release;
+  File? downloaded, helper;
+  Directory? updateFolder;
+  String? installTarget;
+  bool contextReady = false;
   bool busy = false;
   double? progress;
   @override
   void initState() {
     super.initState();
-    appVersion()
-        .then((v) {
-          if (mounted) {
-            setState(() {
-              version = v;
-              status = '点击“检查更新”连接 GitHub Releases';
-            });
-          }
-        })
-        .catchError((Object e) {
-          if (mounted) setState(() => status = '$e');
+    initialize();
+  }
+
+  Future<void> initialize() async {
+    try {
+      final v = await appVersion();
+      if (!mounted) return;
+      setState(() => version = v);
+      if (Platform.isWindows) {
+        final support = await getApplicationSupportDirectory();
+        updateFolder = Directory('${support.path}/updates');
+        helper = await writeUpdateHelper(updateFolder!);
+        final result = await Process.run('powershell.exe', [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-WindowStyle',
+          'Hidden',
+          '-File',
+          helper!.path,
+          '-Inspect',
+        ], stdoutEncoding: utf8);
+        if (result.exitCode != 0) throw StateError('无法核对安装位置：${result.stderr}');
+        installTarget = installedUpdateTarget(
+          Platform.resolvedExecutable,
+          updateFolder!.path,
+          List<String>.from(jsonDecode(result.stdout.toString().trim())),
+        );
+      }
+      var message = '点击“检查更新”连接 GitHub Releases';
+      if (updateFolder != null) {
+        final result = File('${updateFolder!.path}/installer-result.json');
+        if (await result.exists()) {
+          final data = jsonDecode(
+            await result
+                .readAsString(encoding: utf8)
+                .then((s) => s.replaceFirst('\ufeff', '')),
+          );
+          final state = data['state'];
+          message =
+              '${state == 'completed'
+                  ? '上次安装完成（已核验原目录和快捷方式）'
+                  : state == 'failed'
+                  ? '上次安装未完成'
+                  : '上次安装尚未确认完成'}：${data['version']}\n${data['message']}';
+        }
+      }
+      if (mounted) {
+        setState(() {
+          contextReady = true;
+          status = message;
         });
+      }
+    } catch (e) {
+      if (mounted) setState(() => status = '无法确认更新环境：$e');
+    }
   }
 
   Future<void> check() async {
     setState(() {
       busy = true;
       release = null;
+      downloaded = null;
       status = '正在检查正式发布版本…';
     });
     try {
-      final result = await ReleaseClient().check(version);
+      final result = await ReleaseClient().check(
+        version,
+        installed: installTarget != null,
+        repairCurrent:
+            installTarget != null &&
+            File(Platform.resolvedExecutable).parent.path.toLowerCase() !=
+                installTarget!.toLowerCase(),
+      );
       if (mounted) {
         setState(() {
           status = result.message;
@@ -400,14 +546,40 @@ class _UpdateDialogState extends State<UpdateDialog> {
     }
   }
 
+  Future<void> download() async {
+    setState(() {
+      busy = true;
+      status = '正在下载…';
+      progress = 0;
+    });
+    try {
+      downloaded = await ReleaseClient().download(release!, updateFolder!, (v) {
+        if (mounted) setState(() => progress = v);
+      });
+      if (mounted) setState(() => status = '下载完成，SHA-256 校验通过。等待您确认安装。');
+    } catch (e) {
+      if (mounted) setState(() => status = '下载未完成：$e\n原版本与数据未改变。');
+    } finally {
+      if (mounted) {
+        setState(() {
+          busy = false;
+          progress = null;
+        });
+      }
+    }
+  }
+
   Future<void> install() async {
     final selected = release!;
+    if (!(await widget.beforeInstall?.call() ?? true) || !mounted) return;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: Text('安装 ${selected.version}？'),
-        content: const Text(
-          '下载并校验后，将备份旅行数据，安装到独立版本目录并启动新版。原程序保留；下载或安装失败不会替换原程序。新版启动成功后当前窗口关闭。',
+        content: Text(
+          installTarget != null
+              ? '将保存数据快照并关闭当前程序，运行已校验的 EXE 安装包，更新原安装目录：\n$installTarget\n桌面与开始菜单入口将指向此目录。失败时尝试恢复原程序，旅行数据不被替换。'
+              : '当前为便携版。将保存数据快照，部署到独立版本目录并启动新版；原便携目录保留。原目录中的快捷方式不会改写。',
         ),
         actions: [
           TextButton(
@@ -416,7 +588,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('确认下载并安装'),
+            child: const Text('确认安装'),
           ),
         ],
       ),
@@ -424,20 +596,22 @@ class _UpdateDialogState extends State<UpdateDialog> {
     if (accepted != true || !mounted) return;
     setState(() {
       busy = true;
-      status = '正在下载…';
-      progress = 0;
+      status = '等待安装，正在保存数据快照…';
     });
     try {
-      final support = await getApplicationSupportDirectory();
-      final folder = Directory('${support.path}/updates');
-      final file = await ReleaseClient().download(selected, folder, (v) {
-        if (mounted) setState(() => progress = v);
-      });
-      if (mounted) {
-        setState(() {
-          status = '校验通过，准备安装…';
-          progress = null;
-        });
+      final folder = updateFolder!;
+      final file = downloaded!;
+      if (installTarget != null) {
+        await handOffInstaller(
+          folder: folder,
+          helper: helper!,
+          package: file,
+          release: selected,
+          target: installTarget!,
+          store: widget.store,
+        );
+        widget.store.dispose();
+        exit(0);
       }
       final exe = await compute(stageRelease, {
         'archive': file.path,
@@ -522,6 +696,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
               const SizedBox(height: 12),
               const SelectableText(releaseRepository),
               const SizedBox(height: 16),
+              Text(
+                !contextReady
+                    ? '更新方式尚未确认'
+                    : installTarget == null
+                    ? '便携版更新（ZIP）'
+                    : '安装版更新（EXE）：$installTarget',
+              ),
+              const SizedBox(height: 8),
               Text(status),
               if (busy)
                 Padding(
@@ -532,7 +714,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: SelectableText(
-                    '已安装版本位置：${widget.store.setting('installedUpdate')}',
+                    '历史便携更新位置（不代表原安装已更新）：${widget.store.setting('installedUpdate')}',
                   ),
                 ),
             ],
@@ -545,13 +727,17 @@ class _UpdateDialogState extends State<UpdateDialog> {
           child: const Text('关闭'),
         ),
         OutlinedButton(
-          onPressed: busy || version.isEmpty ? null : check,
+          onPressed: busy || version.isEmpty || !contextReady ? null : check,
           child: const Text('检查更新'),
         ),
         if (release != null)
           FilledButton(
-            onPressed: busy || !Platform.isWindows ? null : install,
-            child: const Text('下载并安装'),
+            onPressed: busy || !Platform.isWindows
+                ? null
+                : downloaded == null
+                ? download
+                : install,
+            child: Text(downloaded == null ? '下载更新' : '安装已下载版本'),
           ),
       ],
     ),

@@ -95,7 +95,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => UpdateDialog(store: store),
+        builder: (_) => UpdateDialog(store: store, beforeInstall: leaveEditor),
       );
     } finally {
       showingUpdates = false;

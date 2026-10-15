@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:howdoi/store.dart';
 import 'package:howdoi/updates.dart';
 
 void main() {
@@ -16,6 +18,80 @@ void main() {
     expect(compareVersions('0.1.2', '0.1.2+3'), lessThan(0));
     expect(() => compareVersions('../x', '0.1.2'), throwsFormatException);
   });
+  test(
+    'installation identity excludes unrelated portable copies and repairs legacy versions',
+    () {
+      const installed = r'C:\Apps\Custom HowDoI';
+      const updates = r'C:\Data\updates';
+      expect(
+        installedUpdateTarget('$installed/howdoi.exe', updates, [installed]),
+        installed,
+      );
+      expect(
+        installedUpdateTarget(r'C:\portable\howdoi.exe', updates, [installed]),
+        isNull,
+      );
+      expect(
+        installedUpdateTarget('$updates/versions/0.1.5/howdoi.exe', updates, [
+          installed,
+        ]),
+        installed,
+      );
+      expect(
+        installedUpdateTarget(
+          '$updates/versions/0.1.5/howdoi.exe',
+          updates,
+          [],
+        ),
+        isNull,
+      );
+      expect(
+        () => installedUpdateTarget(
+          '$updates/versions/0.1.5/howdoi.exe',
+          updates,
+          [installed, r'D:\Another'],
+        ),
+        throwsFormatException,
+      );
+    },
+  );
+  testWidgets(
+    'installer confirmation honors unsaved veto and cancellation without data changes',
+    (tester) async {
+      final store = Store(':memory:');
+      var allow = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UpdateDialog(store: store, beforeInstall: () async => allow),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final dynamic state = tester.state(find.byType(UpdateDialog));
+      state.release = AppRelease(
+        '0.1.7',
+        'HowDoI-0.1.7-windows-x64-setup.exe',
+        Uri.parse('https://github.com/test'),
+        '0' * 64,
+        1,
+      );
+      state.installTarget = r'C:\Example\HowDoI';
+      final generation = store.generation;
+      await state.install();
+      await tester.pumpAndSettle();
+      expect(find.text('确认安装'), findsNothing);
+      allow = true;
+      final Future<void> pending = state.install();
+      await tester.pumpAndSettle();
+      expect(find.text('确认安装'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      await pending;
+      expect(store.generation, generation);
+      expect(state.busy, false);
+      await tester.pumpWidget(const SizedBox());
+      store.dispose();
+    },
+  );
   group('real HTTP fixtures', () {
     late HttpServer server;
     late Directory dir;
@@ -83,6 +159,41 @@ void main() {
       file = await client.download(result.release!, dir, (_) {});
       expect(await file.readAsBytes(), payload);
     });
+    test(
+      'installed clients select EXE, portable clients keep ZIP; legacy same-version repair',
+      () async {
+        final zip = metadata['assets'][0];
+        metadata['assets'] = [
+          ...metadata['assets'],
+          {...zip, 'name': 'HowDoI-0.1.3-windows-x64-setup.exe'},
+        ];
+        final installed = await client.check('0.1.2', installed: true);
+        expect(installed.release!.name, endsWith('-setup.exe'));
+        final file = await client.download(installed.release!, dir, (_) {});
+        expect(file.path, endsWith('.exe'));
+        expect((await client.check('0.1.2')).release!.name, endsWith('.zip'));
+        expect(
+          (await client.check('0.1.3+1', installed: true)).release,
+          isNull,
+        );
+        expect(
+          (await client.check(
+            '0.1.3+1',
+            installed: true,
+            repairCurrent: true,
+          )).release,
+          isNotNull,
+        );
+        expect(
+          (await client.check(
+            '0.1.4',
+            installed: true,
+            repairCurrent: true,
+          )).release,
+          isNull,
+        );
+      },
+    );
     test('HTTP errors, missing package and missing checksum', () async {
       status = 503;
       await expectLater(client.check('0.1.2'), throwsA(isA<HttpException>()));

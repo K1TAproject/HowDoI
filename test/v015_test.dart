@@ -84,7 +84,7 @@ void main() {
     },
   );
   test('full version remains available for update checks', () async {
-    expect(await appVersion(), '0.1.5+6');
+    expect(await appVersion(), '0.1.6+7');
   });
 
   for (final width in [1440.0, 700.0]) {

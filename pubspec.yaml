@@ -1,7 +1,7 @@
 name: howdoi
 description: 离线旅行路书
 publish_to: none
-version: 0.1.5+6
+version: 0.1.6+7
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
@@ -25,3 +25,4 @@ flutter:
   uses-material-design: true
   assets:
     - pubspec.yaml
+    - assets/windows-update.ps1
