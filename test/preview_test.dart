@@ -165,6 +165,24 @@ void main() {
         await tester.tap(find.byIcon(Icons.menu));
         await tester.pumpAndSettle();
       }
+      await tester.tap(find.text('旅行总览'));
+      await tester.pumpAndSettle();
+      if (width < 800) {
+        Navigator.of(tester.element(find.byType(Drawer))).pop();
+        await tester.pumpAndSettle();
+      }
+      await capture('overview');
+      await tester.scrollUntilVisible(
+        find.text('预计预算 · 原币种'),
+        350,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+      await capture('overview-budget');
+      if (width < 800) {
+        await tester.tap(find.byIcon(Icons.menu));
+        await tester.pumpAndSettle();
+      }
       await tester.tap(find.text('预备工作'));
       await tester.pumpAndSettle();
       if (width < 800) {

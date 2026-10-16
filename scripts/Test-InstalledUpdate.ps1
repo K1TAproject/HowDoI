@@ -12,6 +12,9 @@ $menu = Join-Path $testRoot 'Programs/HowDoI.lnk'
 $target = Join-Path $testRoot 'Custom 安装目录'
 $old = Join-Path $testRoot 'old-payload'
 Expand-Archive -LiteralPath 'dist/HowDoI-0.1.5-windows-x64.zip' -DestinationPath $old
+$currentFull = ([regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s*([0-9.+]+)')).Groups[1].Value
+$currentVersion = ($currentFull -split '\+')[0]
+$currentNumeric = $currentFull.Replace('+','.')
 $originalSetup = Join-Path $testRoot 'old-setup.exe'
 $newSetup = Join-Path $testRoot 'new-setup.exe'
 function Compile-Isolated($payload, $version, $full, $numeric, $output) {
@@ -21,7 +24,7 @@ function Compile-Isolated($payload, $version, $full, $numeric, $output) {
 function Assert($condition, $message) { if (!$condition) { throw $message } }
 try {
     Compile-Isolated $old '0.1.5' '0.1.5+6' '0.1.5.6' $originalSetup
-    Compile-Isolated "$root\build\windows\x64\runner\Release" '0.1.6' '0.1.6+7' '0.1.6.7' $newSetup
+    Compile-Isolated "$root\build\windows\x64\runner\Release" $currentVersion $currentFull $currentNumeric $newSetup
     $process = Start-Process -FilePath $originalSetup -ArgumentList '/S',("/D=$target") -WindowStyle Hidden -Wait -PassThru
     Assert ($process.ExitCode -eq 0) 'Old installation failed'
     $exe = Join-Path $target 'howdoi.exe'
@@ -30,11 +33,11 @@ try {
     'keep extra file' | Set-Content -LiteralPath $extra
     $dataHash = (Get-UpdateHash $Database)
     $taskJob = [pscustomobject]@{
-        target=$target; package=$newSetup; version='0.1.6'; sha=(Get-UpdateHash $newSetup)
+        target=$target; package=$newSetup; version=$currentVersion; sha=(Get-UpdateHash $newSetup)
         databaseBackup=$Database; result=(Join-Path $testRoot 'result.json')
     }
     $installedExe = Invoke-InstallerUpdate $taskJob $desktop $menu "HKCU:\$uninstallKey" "HKCU:\$installKey"
-    Assert ((Get-Item -LiteralPath $installedExe).VersionInfo.ProductVersion -eq '0.1.6+7') 'New version incorrect'
+    Assert ((Get-Item -LiteralPath $installedExe).VersionInfo.ProductVersion -eq $currentFull) 'New version incorrect'
     Assert ((Get-Content -LiteralPath $taskJob.result -Raw | ConvertFrom-Json).state -eq 'completed') 'Completion not verified'
     Assert ((Get-UpdateHash $Database) -eq $dataHash) 'Fixture database changed'
     Assert ((Get-Content -LiteralPath $extra -Raw).Trim() -eq 'keep extra file') 'Extra user file changed'
@@ -42,7 +45,7 @@ try {
     foreach ($link in @($desktop,$menu)) {
         $shortcut = $shell.CreateShortcut($link)
         Assert ($shortcut.TargetPath -eq $exe) 'Shortcut points elsewhere'
-        Assert ((Get-Item -LiteralPath $shortcut.TargetPath).VersionInfo.ProductVersion -eq '0.1.6+7') 'Shortcut opens old version'
+        Assert ((Get-Item -LiteralPath $shortcut.TargetPath).VersionInfo.ProductVersion -eq $currentFull) 'Shortcut opens old version'
         # Launch through the shortcut itself, with a disposable probe DB, then restore its normal arguments.
         $ready = Join-Path $testRoot ([guid]::NewGuid().ToString('N'))
         $dbCopy = $ready + '.db'
@@ -54,7 +57,7 @@ try {
         $shortcut.Arguments = ''; $shortcut.Save()
         Assert (Test-Path -LiteralPath $ready) 'Shortcut launch did not acknowledge'
     }
-    Write-Output 'PASS: old installed 0.1.5 -> 0.1.6, custom directory, Desktop and Start Menu shortcut launches, data unchanged'
+    Write-Output "PASS: old installed 0.1.5 -> $currentVersion, custom directory, Desktop and Start Menu shortcut launches, data unchanged"
     $prior = (Get-UpdateHash $exe)
     $savedStart = ${function:Start-Installer}
     foreach ($failure in @('cancel','partial','false-success')) {

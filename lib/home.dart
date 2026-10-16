@@ -12,6 +12,7 @@ import 'pickers.dart';
 import 'updates.dart';
 import 'day_actions.dart';
 import 'preparations.dart';
+import 'overview.dart';
 
 class Home extends StatefulWidget {
   final Store store;
@@ -26,6 +27,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   int day = 1;
   bool editing = false;
   bool preparing = false, editingPreparation = false;
+  bool overview = false;
   GlobalKey<PreparationEditorState> preparationKey =
       GlobalKey<PreparationEditorState>();
   final preparationListKey = GlobalKey<PreparationListState>();
@@ -81,6 +83,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     setState(() {
       day = value;
       preparing = false;
+      overview = false;
       editing = false;
     });
     store.setSetting('selectedDay', '$day');
@@ -108,6 +111,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     setState(() {
       tripId = trip.id;
       preparing = false;
+      overview = false;
       editing = false;
       final start = parseDate(trip.data['start']);
       final now = DateTime.now();
@@ -485,6 +489,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               final added = store.addDay(trip);
               setState(() {
                 day = added;
+                preparing = false;
+                overview = false;
                 editing = false;
               });
               store.setSetting('selectedDay', '$added');
@@ -492,6 +498,20 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               if (mounted) notice(context, e);
             }
           }),
+          _NavigationCard(
+            title: '旅行总览',
+            subtitle: '行程 · 地点 · 预计预算',
+            selected: overview,
+            menu: const SizedBox(width: 12),
+            onTap: () async {
+              if (!await leaveEditor() || !mounted) return;
+              setState(() {
+                overview = true;
+                preparing = false;
+                editing = false;
+              });
+            },
+          ),
           _NavigationCard(
             title: '预备工作',
             subtitle:
@@ -502,6 +522,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               if (!await leaveEditor() || !mounted) return;
               setState(() {
                 preparing = true;
+                overview = false;
                 editing = false;
               });
             },
@@ -510,7 +531,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             _NavigationCard(
               title: dayTitle(trip, i),
               subtitle: daySubtitle(trip, i),
-              selected: !preparing && day == i,
+              selected: !preparing && !overview && day == i,
               onTap: () => selectDay(i),
               menu: PopupMenuButton<String>(
                 tooltip: '日期操作：第 $i 天',
@@ -1058,6 +1079,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                             )
                           : editing && !wide
                           ? activeEditor(trip)
+                          : overview
+                          ? TripOverview(
+                              store: store,
+                              trip: trip,
+                              onDay: selectDay,
+                              onItem: (item) => openEditor(trip, item, wide),
+                            )
                           : preparing
                           ? PreparationList(
                               key: preparationListKey,
@@ -1092,7 +1120,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               ),
             ],
           ),
-          floatingActionButton: trip == null || day == 0 || editing || preparing
+          floatingActionButton:
+              trip == null || day == 0 || editing || preparing || overview
               ? null
               : FloatingActionButton.extended(
                   onPressed: () => openEditor(trip, null, wide),
