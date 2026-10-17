@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
+& "$PSScriptRoot/Write-ReleaseNotes.ps1" -CheckOnly
 $version = ([regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s*(\d+\.\d+\.\d+)')).Groups[1].Value
 if (!$version) { throw 'pubspec.yaml 缺少版本号' }
 $javaHomeFile = Join-Path $projectRoot '.local/java-home.txt'
@@ -25,3 +26,4 @@ if (!(Test-Path -LiteralPath $keyFile) -or !(Test-Path -LiteralPath $configFile)
 if ($LASTEXITCODE -ne 0) { throw 'Android 构建失败' }
 New-Item -ItemType Directory -Path dist -Force | Out-Null
 Copy-Item -LiteralPath build/app/outputs/flutter-apk/app-release.apk -Destination "dist/HowDoI-$version-android-arm64.apk" -Force
+& "$PSScriptRoot/Write-ReleaseNotes.ps1"

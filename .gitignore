@@ -48,3 +48,12 @@ Desktop.ini
 dist/
 
 # Keep pubspec.lock tracked when the Flutter application is created.
+
+# Local planning/history documents; publish only maintained entry documents
+*.md
+!/README.md
+!/RELEASE_NOTES.md
+!/AGENTS.md
+!/docs/使用说明.md
+# Original design drafts; runtime icons are in platform resource directories
+/design/

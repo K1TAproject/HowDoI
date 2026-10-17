@@ -798,6 +798,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                     ),
                                   ),
                                 ),
+                              if (Theme.of(context).platform ==
+                                  TargetPlatform.android)
+                                NavigationActions(
+                                  store: store,
+                                  data: d,
+                                  node: node,
+                                ),
                               if ((d['note'] as String).isNotEmpty)
                                 InkWell(
                                   onTap: () => setState(() {
@@ -889,33 +896,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               if (day != 0 && daySubtitle(trip, day).isNotEmpty)
                 Text(daySubtitle(trip, day)),
               Text(day == 0 ? '点击左侧添加日期，再安排当天行程。' : '按时间规划 · 未定时间的安排可拖动穿插'),
-              if (day != 0)
-                TextButton.icon(
-                  icon: const Icon(Icons.map_outlined),
-                  label: const Text('查看当天地图'),
-                  onPressed: () async {
-                    final selected = await Navigator.of(context).push<Record>(
-                      MaterialPageRoute(
-                        builder: (c) => Scaffold(
-                          appBar: AppBar(title: Text(dayTitle(trip, day))),
-                          body: ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: [
-                              TripMap(
-                                nodes: [...rows, ...stays],
-                                daily: true,
-                                onItem: (r) => Navigator.pop(c, r),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                    if (selected != null && mounted) {
-                      openEditor(trip, selected, wide);
-                    }
-                  },
-                ),
             ],
           ),
         ),
@@ -923,12 +903,30 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           child: ReorderableListView.builder(
             buildDefaultDragHandles: false,
             itemCount: rows.length,
-            header: rows.isEmpty
-                ? const Padding(
+            header: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (day != 0 &&
+                    Theme.of(context).platform == TargetPlatform.windows)
+                  ExpansionTile(
+                    key: PageStorageKey('daily-map:${trip.id}:$day'),
+                    initiallyExpanded: true,
+                    title: const Text('当天地点'),
+                    children: [
+                      TripMap(
+                        nodes: [...rows, ...stays],
+                        daily: true,
+                        onItem: (r) => openEditor(trip, r, wide),
+                      ),
+                    ],
+                  ),
+                if (rows.isEmpty)
+                  const Padding(
                     padding: EdgeInsets.all(24),
                     child: Text('还没有安排，添加第一站吧。'),
-                  )
-                : null,
+                  ),
+              ],
+            ),
             footer: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

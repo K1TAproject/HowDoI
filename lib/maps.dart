@@ -301,7 +301,7 @@ class TripMap extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('行程顺序，非实际道路路线。实线：已记录交通起终点；虚线：到访先后。不计算交通耗时。'),
+        if (!daily) const Text('行程顺序，非实际道路路线。实线：已记录交通起终点；虚线：到访先后。不计算交通耗时。'),
         if (located.isEmpty)
           const Padding(
             padding: EdgeInsets.all(16),
@@ -309,60 +309,99 @@ class TripMap extends StatelessWidget {
           )
         else
           SizedBox(
-            height: 360,
+            height: daily
+                ? (MediaQuery.sizeOf(context).width < 700 ? 260 : 320)
+                : 360,
             child: PlaceMap(
               points: located.map((v) => v.place!).toList(),
-              connections: [
-                for (var i = 1; i < located.length; i++)
-                  located[i - 1].node.day == 0 || located[i].node.day == 0
-                      ? null
-                      : located[i - 1].node.item.id ==
-                                located[i].node.item.id &&
-                            located[i - 1].slot == 'origin' &&
-                            located[i].slot == 'destination',
-              ],
+              connections: daily
+                  ? const []
+                  : [
+                      for (var i = 1; i < located.length; i++)
+                        located[i - 1].node.day == 0 || located[i].node.day == 0
+                            ? null
+                            : located[i - 1].node.item.id ==
+                                      located[i].node.item.id &&
+                                  located[i - 1].slot == 'origin' &&
+                                  located[i].slot == 'destination',
+                    ],
               onPoint: (i) => showDialog<void>(
                 context: context,
                 builder: (c) => AlertDialog(
-                  title: Text('${i + 1}. ${located[i].label}'),
-                  content: Text(
-                    '${located[i].node.time}\n${located[i].place!['address']}\n${itemTitle(located[i].node.item.data)}',
+                  title: Text(located[i].label),
+                  content: SizedBox(
+                    width: 420,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var j = 0; j < located.length; j++)
+                            if (located[j].place!['lat'] ==
+                                    located[i].place!['lat'] &&
+                                located[j].place!['lon'] ==
+                                    located[i].place!['lon'])
+                              ListTile(
+                                title: Text(
+                                  '${j + 1}. ${itemTitle(located[j].node.item.data)}',
+                                ),
+                                subtitle: Text(
+                                  '${located[j].node.time} · ${located[j].label}\n${located[j].place!['address']}',
+                                ),
+                                trailing: const Icon(Icons.edit_outlined),
+                                onTap: () {
+                                  Navigator.pop(c);
+                                  onItem(located[j].node.item);
+                                },
+                              ),
+                        ],
+                      ),
+                    ),
                   ),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(c),
                       child: const Text('关闭'),
                     ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.pop(c);
-                        onItem(located[i].node.item);
-                      },
-                      child: const Text('编辑行程'),
-                    ),
                   ],
                 ),
               ),
             ),
           ),
-        for (var i = 0; i < located.length; i++)
-          ListTile(
-            title: Text('${i + 1}. ${located[i].label}'),
-            subtitle: Text(
-              '${located[i].node.day == 0 ? '历史未安排' : '第 ${located[i].node.day} 天'} · ${located[i].node.time} · ${located[i].slot == 'origin'
-                  ? '交通起点'
-                  : located[i].slot == 'destination'
-                  ? '交通终点'
-                  : '地点'}',
-            ),
-            onTap: () => onItem(located[i].node.item),
+        if (located.isNotEmpty)
+          ExpansionTile(
+            key: PageStorageKey('map-place-list:$daily'),
+            title: Text('地点与行程 · ${located.length}'),
+            children: [
+              for (var i = 0; i < located.length; i++)
+                ListTile(
+                  title: Text('${i + 1}. ${located[i].label}'),
+                  subtitle: Text(
+                    '${located[i].node.day == 0 ? '历史未安排' : '第 ${located[i].node.day} 天'} · ${located[i].node.time} · ${located[i].slot == 'origin'
+                        ? '交通起点'
+                        : located[i].slot == 'destination'
+                        ? '交通终点'
+                        : '地点'}',
+                  ),
+                  onTap: () => onItem(located[i].node.item),
+                ),
+            ],
           ),
-        for (final v in visits.where((v) => v.place == null || v.stale))
-          ListTile(
+        if (visits.any((v) => v.place == null || v.stale))
+          ExpansionTile(
+            key: PageStorageKey('map-missing-list:$daily'),
             title: Text(
-              '${v.stale ? '文字已变更，请核对位置' : '尚未关联地点'} · ${v.label.isEmpty ? itemTitle(v.node.item.data) : v.label}',
+              '尚未关联地点 / 待核对 · ${visits.where((v) => v.place == null || v.stale).length}',
             ),
-            onTap: () => onItem(v.node.item),
+            children: [
+              for (final v in visits.where((v) => v.place == null || v.stale))
+                ListTile(
+                  title: Text(
+                    '${v.stale ? '文字已变更，请核对位置' : '尚未关联地点'} · ${v.label.isEmpty ? itemTitle(v.node.item.data) : v.label}',
+                  ),
+                  trailing: const Icon(Icons.edit_location_alt_outlined),
+                  onTap: () => onItem(v.node.item),
+                ),
+            ],
           ),
       ],
     );
@@ -552,6 +591,7 @@ Future<void> navigatePlace(
   Store store,
   Map<String, dynamic> d, {
   String? slot,
+  bool options = false,
 }) async {
   final target = slot ?? (isTransport(d['type']) ? 'destination' : 'place');
   final p = placeStale(d, target) ? null : linkedPlace(d, target);
@@ -564,6 +604,25 @@ Future<void> navigatePlace(
       store.setting('mapProvider:$region') ??
       (region == 'domestic' ? 'baidu' : 'google');
   String? message;
+  if (!hasPlace(d, target)) return;
+  if (!options &&
+      (p?['country'] == 'cn' ||
+          (p?['country'] is String && p!['country'] != '') ||
+          store.setting('mapRegion') != null)) {
+    if (p == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('正在搜索文字地点，请在地图中确认结果。')));
+    }
+    final ok = await openMapUrl(navigationUri(provider, d, target));
+    if (!context.mounted) return;
+    if (ok) {
+      store.setSetting('mapRegion', region);
+      store.setSetting('mapProvider:$region', provider);
+      return;
+    }
+    message = '无法打开地图。请尝试网页搜索，或复制地址。';
+  }
   await showDialog<void>(
     context: context,
     builder: (c) => StatefulBuilder(
@@ -627,6 +686,14 @@ Future<void> navigatePlace(
                   spacing: 8,
                   children: [
                     TextButton(
+                      onPressed: () {
+                        store.setSetting('mapRegion', region);
+                        store.setSetting('mapProvider:$region', provider);
+                        set(() => message = '地图偏好已保存');
+                      },
+                      child: const Text('保存地图偏好'),
+                    ),
+                    TextButton(
                       onPressed: () => launch(),
                       child: Text(
                         p == null || placeStale(d, target)
@@ -672,4 +739,72 @@ Future<void> navigatePlace(
       },
     ),
   );
+}
+
+class NavigationActions extends StatelessWidget {
+  final Store store;
+  final Map<String, dynamic> data;
+  final PlanNode? node;
+  final String? slot;
+  const NavigationActions({
+    super.key,
+    required this.store,
+    required this.data,
+    this.node,
+    this.slot,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final target =
+        slot ??
+        (node == null
+            ? (isTransport(data['type']) ? 'destination' : 'place')
+            : navigationSlot(node!));
+    final valid =
+        linkedPlace(data, target) != null && !placeStale(data, target);
+    final label = !valid
+        ? (target == 'origin'
+              ? '搜索地点 · 出发地'
+              : node?.end == true
+              ? '搜索地点 · 到达地'
+              : '搜索地点')
+        : target == 'origin'
+        ? '前往出发地'
+        : node?.end == true
+        ? '前往到达地'
+        : '导航';
+    final origin = isTransport(data['type']) && hasPlace(data, 'origin');
+    if (!hasPlace(data, target) && !origin) return const SizedBox.shrink();
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (hasPlace(data, target))
+          TextButton.icon(
+            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+            icon: Icon(valid ? Icons.navigation_outlined : Icons.search),
+            label: Text(label),
+            onPressed: () => navigatePlace(context, store, data, slot: target),
+          ),
+        PopupMenuButton<String>(
+          tooltip: '导航选项',
+          onSelected: (value) => navigatePlace(
+            context,
+            store,
+            data,
+            slot: value == 'origin'
+                ? 'origin'
+                : hasPlace(data, target)
+                ? target
+                : 'origin',
+            options: value == 'preferences',
+          ),
+          itemBuilder: (_) => [
+            if (origin && target != 'origin')
+              const PopupMenuItem(value: 'origin', child: Text('前往起点')),
+            const PopupMenuItem(value: 'preferences', child: Text('地图偏好与备用方式')),
+          ],
+        ),
+      ],
+    );
+  }
 }

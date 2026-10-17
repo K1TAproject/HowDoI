@@ -8,7 +8,7 @@ $env:GRADLE_USER_HOME = Join-Path $projectRoot '.tools/gradle'
 $localJava = Join-Path $projectRoot '.local/java-home.txt'
 if (Test-Path -LiteralPath $localJava) { $env:JAVA_HOME = (Get-Content -LiteralPath $localJava -Raw).Trim() }
 $flutter = Join-Path $projectRoot '.tools/flutter/bin/flutter.bat'
-if (!(Test-Path -LiteralPath $flutter)) { throw '请先按 docs/开发与验证.md 安装本地 Flutter 工具链。' }
+if (!(Test-Path -LiteralPath $flutter)) { throw '请先按 README.md 安装本地 Flutter 工具链。' }
 # Directory junctions avoid requiring Windows Developer Mode for plugin links.
 $pluginsFile = Join-Path $projectRoot '.flutter-plugins-dependencies'
 if (Test-Path -LiteralPath $pluginsFile) {

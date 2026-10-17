@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
+& "$PSScriptRoot/Write-ReleaseNotes.ps1" -CheckOnly
 $version = ([regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s*(\d+\.\d+\.\d+)')).Groups[1].Value
 if (!$version) { throw 'pubspec.yaml 缺少版本号' }
 & "$PSScriptRoot/Flutter.ps1" build windows --release
@@ -22,3 +23,4 @@ Compress-Archive -Path "$releaseDir/*" -DestinationPath $package -Force
 $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $(Split-Path $package -Leaf)" | Set-Content -LiteralPath dist/SHA256SUMS.txt -Encoding ascii
 Write-Output "Windows 便携包已生成：$package"
+& "$PSScriptRoot/Write-ReleaseNotes.ps1"

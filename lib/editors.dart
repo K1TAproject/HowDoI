@@ -738,6 +738,8 @@ class ItemEditorState extends State<ItemEditor> {
                   key: const PageStorageKey('editor-map-locations'),
                   title: const Text('地图地点（可选）'),
                   children: [
+                    if (Theme.of(context).platform == TargetPlatform.android)
+                      const Text('地点搜索和地图选点请在 Windows 完成后同步。'),
                     for (final slot in placeSlots(value()))
                       AnimatedBuilder(
                         animation: Listenable.merge([
@@ -777,27 +779,29 @@ class ItemEditorState extends State<ItemEditor> {
                                 Wrap(
                                   spacing: 8,
                                   children: [
-                                    TextButton(
-                                      onPressed: () async {
-                                        final picked = await choosePlace(
-                                          context,
-                                          widget.store,
-                                          placeText(d, slot),
-                                          p,
-                                        );
-                                        if (picked != null && mounted) {
-                                          setState(() {
-                                            draft['locations'] = {
-                                              ...?draft['locations'] as Map?,
-                                              slot: picked,
-                                            };
-                                          });
-                                        }
-                                      },
-                                      child: Text(
-                                        p == null ? '关联地点' : '更换 / 核对',
+                                    if (Theme.of(context).platform ==
+                                        TargetPlatform.windows)
+                                      TextButton(
+                                        onPressed: () async {
+                                          final picked = await choosePlace(
+                                            context,
+                                            widget.store,
+                                            placeText(d, slot),
+                                            p,
+                                          );
+                                          if (picked != null && mounted) {
+                                            setState(() {
+                                              draft['locations'] = {
+                                                ...?draft['locations'] as Map?,
+                                                slot: picked,
+                                              };
+                                            });
+                                          }
+                                        },
+                                        child: Text(
+                                          p == null ? '关联地点' : '更换 / 核对',
+                                        ),
                                       ),
-                                    ),
                                     if (p != null)
                                       TextButton(
                                         onPressed: () => setState(() {
@@ -810,15 +814,13 @@ class ItemEditorState extends State<ItemEditor> {
                                         }),
                                         child: const Text('解除关联'),
                                       ),
-                                    TextButton(
-                                      onPressed: () => navigatePlace(
-                                        context,
-                                        widget.store,
-                                        d,
-                                        slot: slot,
-                                      ),
-                                      child: const Text('外部地图'),
+                                    NavigationActions(
+                                      store: widget.store,
+                                      data: d,
+                                      slot: slot,
                                     ),
+                                    if (!hasPlace(d, slot))
+                                      const Text('请先填写地点'),
                                   ],
                                 ),
                               ],

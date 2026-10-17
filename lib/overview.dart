@@ -140,11 +140,21 @@ class TripOverview extends StatelessWidget {
       padding: const EdgeInsets.only(top: 20, bottom: 8),
       child: Text(text, style: Theme.of(context).textTheme.titleLarge),
     );
-    Widget item(PlanNode n) => ListTile(
-      title: Text(itemTitle(n.item.data)),
-      subtitle: Text(overviewItemDetail(trip, n)),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => onItem(n.item),
+    Widget item(PlanNode n) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          title: Text(itemTitle(n.item.data)),
+          subtitle: Text(overviewItemDetail(trip, n)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => onItem(n.item),
+        ),
+        if (Theme.of(context).platform == TargetPlatform.android)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: NavigationActions(store: store, data: n.item.data, node: n),
+          ),
+      ],
     );
     final currenciesPresent = currencies.where(
       (c) => data.items.any(
@@ -212,19 +222,21 @@ class TripOverview extends StatelessWidget {
               ],
             ),
           ),
-        heading('旅行地图'),
-        ExpansionTile(
-          key: PageStorageKey('overview-map:${trip.id}'),
-          title: const Text('查看旅行地图'),
-          children: [
-            TripMap(
-              nodes: [
-                for (final day in [...data.days, 0]) ...data.byDay[day]!,
-              ],
-              onItem: onItem,
-            ),
-          ],
-        ),
+        if (Theme.of(context).platform == TargetPlatform.windows) ...[
+          heading('旅行地图'),
+          ExpansionTile(
+            key: PageStorageKey('overview-map:${trip.id}'),
+            title: const Text('查看旅行地图'),
+            children: [
+              TripMap(
+                nodes: [
+                  for (final day in [...data.days, 0]) ...data.byDay[day]!,
+                ],
+                onItem: onItem,
+              ),
+            ],
+          ),
+        ],
         heading('地点与到访顺序'),
         const Text(
           '按现有行程顺序列出；行与行之间仅表示先后，不代表交通连接。跨日交通在出发日列起点、到达日列终点；住宿覆盖日不重复推定到访。',

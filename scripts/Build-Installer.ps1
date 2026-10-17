@@ -2,6 +2,7 @@ param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
+& "$PSScriptRoot/Write-ReleaseNotes.ps1" -CheckOnly
 $match = [regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s*((\d+\.\d+\.\d+)\+(\d+))')
 if (!$match.Success) { throw 'pubspec.yaml 需要版本号与构建号' }
 $fullVersion = $match.Groups[1].Value
@@ -37,3 +38,4 @@ $packageName = Split-Path $package -Leaf
 $existing = if (Test-Path -LiteralPath $checksumFile) { @(Get-Content -LiteralPath $checksumFile | Where-Object { $_ -and !$_.EndsWith($packageName) }) } else { @() }
 @($existing; "$hash  $packageName") | Set-Content -LiteralPath $checksumFile -Encoding ascii
 Write-Output "Windows 安装包已生成：$package"
+& "$PSScriptRoot/Write-ReleaseNotes.ps1"

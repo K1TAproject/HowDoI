@@ -25,6 +25,21 @@ bool placeStale(Map<String, dynamic> d, String slot) =>
     linkedPlace(d, slot) != null &&
     linkedPlace(d, slot)!['sourceText'] != placeText(d, slot);
 
+bool hasPlace(Map<String, dynamic> d, String slot) =>
+    placeText(d, slot).isNotEmpty ||
+    (!placeStale(d, slot) && linkedPlace(d, slot) != null);
+
+String navigationSlot(PlanNode node) {
+  final d = node.item.data;
+  if (!isTransport(d['type'])) return 'place';
+  if (node.end) return 'destination';
+  if (d['type'] == '租车' ||
+      (scheduledTransport(d['type']) && d['endDay'] > d['day'])) {
+    return 'origin';
+  }
+  return 'destination';
+}
+
 class MapVisit {
   final PlanNode node;
   final String slot;
@@ -39,6 +54,7 @@ List<MapVisit> mapVisits(Iterable<PlanNode> nodes, {bool daily = false}) {
   final seen = <String>{};
   for (final n in nodes) {
     final d = n.item.data;
+    if (d['type'] == '住宿' && n.end) continue;
     final slots = isTransport(d['type'])
         ? n.end
               ? ['destination']
