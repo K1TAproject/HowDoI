@@ -449,6 +449,13 @@ class Store extends ChangeNotifier {
     );
     return jsonEncode({
       'format': sync ? 'howdoi-sync' : 'howdoi-backup',
+      if (rows.any(
+        (r) =>
+            r.kind == 'item' &&
+            (r.data['locations'] as Map?)?.isNotEmpty == true,
+      ))
+        'mapAttribution':
+            '© OpenStreetMap contributors, ODbL; https://www.openstreetmap.org/copyright',
       'version': 3,
       'records': rows
           .where((r) => trip == null || r.id == trip || r.data['trip'] == trip)

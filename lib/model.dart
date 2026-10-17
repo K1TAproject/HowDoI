@@ -145,6 +145,7 @@ class Record {
 }
 
 void validateData(String kind, Map<String, dynamic> d) {
+  if (kind == 'item') validateLocations(d['locations']);
   if (utf8.encode(jsonEncode(d)).length > 100000) {
     throw const FormatException('单条记录过大');
   }
@@ -316,6 +317,35 @@ class Budget {
           () => <String, BigInt>{},
         );
         subtotal[currency] = (subtotal[currency] ?? BigInt.zero) + amount;
+      }
+    }
+  }
+}
+
+void validateLocations(dynamic locations) {
+  if (locations == null) return;
+  if (locations is! Map || locations.length > 3) {
+    throw const FormatException('地点关联格式无效');
+  }
+  for (final e in locations.entries) {
+    final p = e.value;
+    if (!['origin', 'destination', 'place'].contains(e.key) ||
+        p is! Map ||
+        p['lat'] is! num ||
+        p['lon'] is! num ||
+        !(p['lat'] as num).isFinite ||
+        !(p['lon'] as num).isFinite ||
+        p['lat'] < -90 ||
+        p['lat'] > 90 ||
+        p['lon'] < -180 ||
+        p['lon'] > 180 ||
+        p['crs'] != 'WGS84' ||
+        !['osm', 'manual'].contains(p['provider'])) {
+      throw const FormatException('地点坐标或供应商不兼容，请使用新版应用');
+    }
+    for (final k in ['name', 'address', 'id', 'sourceText', 'country']) {
+      if (p[k] is! String || (p[k] as String).length > 2000) {
+        throw const FormatException('地点信息无效');
       }
     }
   }

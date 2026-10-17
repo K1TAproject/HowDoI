@@ -13,6 +13,7 @@ import 'updates.dart';
 import 'day_actions.dart';
 import 'preparations.dart';
 import 'overview.dart';
+import 'maps.dart';
 
 class Home extends StatefulWidget {
   final Store store;
@@ -887,7 +888,34 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               const SizedBox(height: 5),
               if (day != 0 && daySubtitle(trip, day).isNotEmpty)
                 Text(daySubtitle(trip, day)),
-              Text(day == 0 ? '点击左侧“添加日期”，再安排当天行程。' : '按时间规划 · 未定时间的安排可拖动穿插'),
+              Text(day == 0 ? '点击左侧添加日期，再安排当天行程。' : '按时间规划 · 未定时间的安排可拖动穿插'),
+              if (day != 0)
+                TextButton.icon(
+                  icon: const Icon(Icons.map_outlined),
+                  label: const Text('查看当天地图'),
+                  onPressed: () async {
+                    final selected = await Navigator.of(context).push<Record>(
+                      MaterialPageRoute(
+                        builder: (c) => Scaffold(
+                          appBar: AppBar(title: Text(dayTitle(trip, day))),
+                          body: ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              TripMap(
+                                nodes: [...rows, ...stays],
+                                daily: true,
+                                onItem: (r) => Navigator.pop(c, r),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                    if (selected != null && mounted) {
+                      openEditor(trip, selected, wide);
+                    }
+                  },
+                ),
             ],
           ),
         ),

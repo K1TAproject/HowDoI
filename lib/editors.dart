@@ -4,6 +4,8 @@ import 'planner.dart';
 import 'pickers.dart';
 import 'model.dart';
 import 'store.dart';
+import 'places.dart';
+import 'maps.dart';
 
 void notice(BuildContext context, Object message) =>
     ScaffoldMessenger.of(context).showSnackBar(
@@ -732,6 +734,100 @@ class ItemEditorState extends State<ItemEditor> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
+                ExpansionTile(
+                  key: const PageStorageKey('editor-map-locations'),
+                  title: const Text('地图地点（可选）'),
+                  children: [
+                    for (final slot in placeSlots(value()))
+                      AnimatedBuilder(
+                        animation: Listenable.merge([
+                          name,
+                          field('address'),
+                          field('origin'),
+                          field('destination'),
+                        ]),
+                        builder: (context, _) {
+                          final d = value(), p = linkedPlace(value(), slot);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  slot == 'origin'
+                                      ? '起点'
+                                      : slot == 'destination'
+                                      ? '终点'
+                                      : '地点',
+                                ),
+                                Text(
+                                  p == null
+                                      ? '尚未关联地点'
+                                      : '${p['name']} · ${p['address']}',
+                                ),
+                                if (placeStale(d, slot))
+                                  Text(
+                                    '文字地点已改变，请核对并重新确认位置',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.error,
+                                    ),
+                                  ),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    TextButton(
+                                      onPressed: () async {
+                                        final picked = await choosePlace(
+                                          context,
+                                          widget.store,
+                                          placeText(d, slot),
+                                          p,
+                                        );
+                                        if (picked != null && mounted) {
+                                          setState(() {
+                                            draft['locations'] = {
+                                              ...?draft['locations'] as Map?,
+                                              slot: picked,
+                                            };
+                                          });
+                                        }
+                                      },
+                                      child: Text(
+                                        p == null ? '关联地点' : '更换 / 核对',
+                                      ),
+                                    ),
+                                    if (p != null)
+                                      TextButton(
+                                        onPressed: () => setState(() {
+                                          final locations =
+                                              Map<String, dynamic>.from(
+                                                draft['locations'],
+                                              );
+                                          locations.remove(slot);
+                                          draft['locations'] = locations;
+                                        }),
+                                        child: const Text('解除关联'),
+                                      ),
+                                    TextButton(
+                                      onPressed: () => navigatePlace(
+                                        context,
+                                        widget.store,
+                                        d,
+                                        slot: slot,
+                                      ),
+                                      child: const Text('外部地图'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
                 Input('备注', note, lines: 3),
                 ExpansionTile(
                   title: const Text('补充信息'),

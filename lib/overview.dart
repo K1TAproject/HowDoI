@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'model.dart';
 import 'planner.dart';
 import 'store.dart';
+import 'maps.dart';
 
 class TripOverviewData {
   final Record trip;
@@ -211,6 +212,19 @@ class TripOverview extends StatelessWidget {
               ],
             ),
           ),
+        heading('旅行地图'),
+        ExpansionTile(
+          key: PageStorageKey('overview-map:${trip.id}'),
+          title: const Text('查看旅行地图'),
+          children: [
+            TripMap(
+              nodes: [
+                for (final day in [...data.days, 0]) ...data.byDay[day]!,
+              ],
+              onItem: onItem,
+            ),
+          ],
+        ),
         heading('地点与到访顺序'),
         const Text(
           '按现有行程顺序列出；行与行之间仅表示先后，不代表交通连接。跨日交通在出发日列起点、到达日列终点；住宿覆盖日不重复推定到访。',

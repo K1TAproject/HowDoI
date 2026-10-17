@@ -1,7 +1,7 @@
 name: howdoi
 description: 离线旅行路书
 publish_to: none
-version: 0.1.8+9
+version: 0.1.9+10
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
@@ -19,6 +19,10 @@ dependencies:
   archive: ^4.5.1
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.2
+  flutter_map: ^8.3.2
+  latlong2: ^0.9.1
+  url_launcher: ^6.3.2
+  http: ^1.6.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
