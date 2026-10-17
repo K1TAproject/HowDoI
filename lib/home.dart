@@ -23,6 +23,7 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> with WidgetsBindingObserver {
+  final scaffoldKey = GlobalKey<ScaffoldState>();
   String? tripId, editId;
   int day = 1;
   bool editing = false;
@@ -70,7 +71,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    widget.sync.active = !showingUpdates && state == AppLifecycleState.resumed;
+    widget.sync.active =
+        !showingUpdates &&
+        (widget.sync.host || state == AppLifecycleState.resumed);
     if (widget.sync.active) widget.sync.tick();
   }
 
@@ -87,10 +90,29 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       editing = false;
     });
     store.setSetting('selectedDay', '$day');
+    scaffoldKey.currentState?.closeDrawer();
   }
 
   Future<void> about() async {
     if (!await leaveEditor() || !mounted) return;
+    if (!Platform.isWindows) {
+      final version = await appVersion();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('关于 HowDoI'),
+          content: Text('v${version.split('+').first}\n离线路书 · 与自己的电脑同步'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
     setState(() => editing = false);
     showingUpdates = true;
     widget.sync.active = false;
@@ -123,6 +145,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     });
     store.setSetting('selectedTrip', trip.id);
     store.setSetting('selectedDay', '$day');
+    scaffoldKey.currentState?.closeDrawer();
   }
 
   Future<void> backup(Record? trip) async {
@@ -510,6 +533,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 preparing = false;
                 editing = false;
               });
+              scaffoldKey.currentState?.closeDrawer();
             },
           ),
           _NavigationCard(
@@ -525,6 +549,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 overview = false;
                 editing = false;
               });
+              scaffoldKey.currentState?.closeDrawer();
             },
           ),
           for (final i in store.visibleDays(trip.id))
@@ -950,184 +975,200 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       builder: (context, size) {
         final wide = size.maxWidth >= 1100;
         final sidebar = size.maxWidth >= 800;
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(trip?.data['name'] ?? 'HowDoI'),
-            actions: [
-              IconButton(
-                tooltip: '关于 / 检查更新',
-                onPressed: about,
-                icon: const Icon(Icons.info_outline),
-              ),
-              IconButton(
-                tooltip: '设备同步',
-                onPressed: () => showSyncDialog(context, widget.sync),
-                icon: const Icon(Icons.sync),
-              ),
-              if (trip != null) ...[
+        return PopScope(
+          canPop: Theme.of(context).platform != TargetPlatform.android,
+          onPopInvokedWithResult: (didPop, _) async {
+            if (didPop ||
+                Theme.of(context).platform != TargetPlatform.android ||
+                ModalRoute.of(context)?.isCurrent != true) {
+              return;
+            }
+            if (scaffoldKey.currentState?.isDrawerOpen ?? false) {
+              scaffoldKey.currentState?.closeDrawer();
+              return;
+            }
+            if (await leaveEditor() && mounted) await SystemNavigator.pop();
+          },
+          child: Scaffold(
+            key: scaffoldKey,
+            appBar: AppBar(
+              title: Text(trip?.data['name'] ?? 'HowDoI'),
+              actions: [
                 IconButton(
-                  tooltip: '预算',
-                  onPressed: () => showBudget(trip),
-                  icon: const Icon(Icons.account_balance_wallet_outlined),
+                  tooltip: '关于 / 检查更新',
+                  onPressed: about,
+                  icon: const Icon(Icons.info_outline),
+                ),
+                IconButton(
+                  tooltip: '设备同步',
+                  onPressed: () => showSyncDialog(context, widget.sync),
+                  icon: const Icon(Icons.sync),
+                ),
+                if (trip != null) ...[
+                  IconButton(
+                    tooltip: '预算',
+                    onPressed: () => showBudget(trip),
+                    icon: const Icon(Icons.account_balance_wallet_outlined),
+                  ),
+                ],
+                PopupMenuButton<String>(
+                  onSelected: (v) async {
+                    if (!await leaveEditor() || !context.mounted) return;
+                    setState(() => editing = false);
+                    switch (v) {
+                      case 'all':
+                        await backup(null);
+                      case 'import':
+                        await importBackup();
+                    }
+                  },
+                  itemBuilder: (c) => [
+                    const PopupMenuItem(value: 'all', child: Text('导出全部旅行')),
+                    const PopupMenuItem(value: 'import', child: Text('导入备份副本')),
+                  ],
                 ),
               ],
-              PopupMenuButton<String>(
-                onSelected: (v) async {
-                  if (!await leaveEditor() || !context.mounted) return;
-                  setState(() => editing = false);
-                  switch (v) {
-                    case 'all':
-                      await backup(null);
-                    case 'import':
-                      await importBackup();
-                  }
-                },
-                itemBuilder: (c) => [
-                  const PopupMenuItem(value: 'all', child: Text('导出全部旅行')),
-                  const PopupMenuItem(value: 'import', child: Text('导入备份副本')),
-                ],
-              ),
-            ],
-          ),
-          drawer: sidebar
-              ? null
-              : Drawer(child: SafeArea(child: navigation(trip))),
-          body: Column(
-            children: [
-              Material(
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                child: InkWell(
-                  onTap: () => showSyncDialog(context, widget.sync),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          widget.sync.enabled
-                              ? Icons.wifi
-                              : Icons.offline_bolt_outlined,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            widget.sync.status,
-                            style: const TextStyle(fontSize: 12),
+            ),
+            drawer: sidebar
+                ? null
+                : Drawer(child: SafeArea(child: navigation(trip))),
+            body: Column(
+              children: [
+                Material(
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  child: InkWell(
+                    onTap: () => showSyncDialog(context, widget.sync),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            widget.sync.enabled
+                                ? Icons.wifi
+                                : Icons.offline_bolt_outlined,
+                            size: 16,
                           ),
-                        ),
-                        const Text(
-                          '离线可用 · 编辑后保存',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              widget.sync.status,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                          const Text(
+                            '离线可用 · 编辑后保存',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    if (sidebar) ...[
-                      SizedBox(
-                        width: 230,
-                        child: Material(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.surfaceContainerLow,
-                          child: navigation(trip),
+                Expanded(
+                  child: Row(
+                    children: [
+                      if (sidebar) ...[
+                        SizedBox(
+                          width: 230,
+                          child: Material(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerLow,
+                            child: navigation(trip),
+                          ),
                         ),
+                        const VerticalDivider(width: 1),
+                      ],
+                      Expanded(
+                        child: trip == null
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.explore_outlined,
+                                      size: 72,
+                                      color: Colors.blueGrey,
+                                    ),
+                                    const SizedBox(height: 20),
+                                    Text(
+                                      '每段旅程，从这里开始',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.headlineSmall,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text('离线路书 · 自由编排 · 预算心中有数'),
+                                    const SizedBox(height: 24),
+                                    FilledButton.icon(
+                                      onPressed: () async {
+                                        if (await leaveEditor() &&
+                                            context.mounted) {
+                                          setState(() => editing = false);
+                                          await editTrip(context, store);
+                                        }
+                                      },
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('创建第一次旅行'),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : editing && !wide
+                            ? activeEditor(trip)
+                            : overview
+                            ? TripOverview(
+                                store: store,
+                                trip: trip,
+                                onDay: selectDay,
+                                onItem: (item) => openEditor(trip, item, wide),
+                              )
+                            : preparing
+                            ? PreparationList(
+                                key: preparationListKey,
+                                store: store,
+                                trip: trip,
+                                beforeChange: () async {
+                                  if (!await leaveEditor(includeQuick: false) ||
+                                      !mounted) {
+                                    return false;
+                                  }
+                                  setState(() => editing = false);
+                                  return true;
+                                },
+                                onEdit: (id) => openPreparation(trip, id, wide),
+                              )
+                            : itinerary(trip, wide),
                       ),
-                      const VerticalDivider(width: 1),
-                    ],
-                    Expanded(
-                      child: trip == null
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.explore_outlined,
-                                    size: 72,
-                                    color: Colors.blueGrey,
-                                  ),
-                                  const SizedBox(height: 20),
-                                  Text(
-                                    '每段旅程，从这里开始',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.headlineSmall,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  const Text('离线路书 · 自由编排 · 预算心中有数'),
-                                  const SizedBox(height: 24),
-                                  FilledButton.icon(
-                                    onPressed: () async {
-                                      if (await leaveEditor() &&
-                                          context.mounted) {
-                                        setState(() => editing = false);
-                                        await editTrip(context, store);
-                                      }
-                                    },
-                                    icon: const Icon(Icons.add),
-                                    label: const Text('创建第一次旅行'),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : editing && !wide
-                          ? activeEditor(trip)
-                          : overview
-                          ? TripOverview(
-                              store: store,
-                              trip: trip,
-                              onDay: selectDay,
-                              onItem: (item) => openEditor(trip, item, wide),
-                            )
-                          : preparing
-                          ? PreparationList(
-                              key: preparationListKey,
-                              store: store,
-                              trip: trip,
-                              beforeChange: () async {
-                                if (!await leaveEditor(includeQuick: false) ||
-                                    !mounted) {
-                                  return false;
-                                }
-                                setState(() => editing = false);
-                                return true;
-                              },
-                              onEdit: (id) => openPreparation(trip, id, wide),
-                            )
-                          : itinerary(trip, wide),
-                    ),
-                    if (wide && trip != null && editing) ...[
-                      const VerticalDivider(width: 1),
-                      SizedBox(
-                        width: 410,
-                        child: Material(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.surfaceContainerLow,
-                          child: activeEditor(trip),
+                      if (wide && trip != null && editing) ...[
+                        const VerticalDivider(width: 1),
+                        SizedBox(
+                          width: 410,
+                          child: Material(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerLow,
+                            child: activeEditor(trip),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
+            floatingActionButton:
+                trip == null || day == 0 || editing || preparing || overview
+                ? null
+                : FloatingActionButton.extended(
+                    onPressed: () => openEditor(trip, null, wide),
+                    icon: const Icon(Icons.add),
+                    label: const Text('添加行程'),
+                  ),
           ),
-          floatingActionButton:
-              trip == null || day == 0 || editing || preparing || overview
-              ? null
-              : FloatingActionButton.extended(
-                  onPressed: () => openEditor(trip, null, wide),
-                  icon: const Icon(Icons.add),
-                  label: const Text('添加行程'),
-                ),
         );
       },
     );

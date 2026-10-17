@@ -7,12 +7,13 @@ import 'model.dart';
 // A bounded editor-local overlay. It never covers the editor's save/close row.
 class PickerRegion extends StatefulWidget {
   final Widget child;
-  const PickerRegion({super.key, required this.child});
+  final bool handleBack;
+  const PickerRegion({super.key, required this.child, this.handleBack = true});
   @override
-  State<PickerRegion> createState() => _PickerRegionState();
+  State<PickerRegion> createState() => PickerRegionState();
 }
 
-class _PickerRegionState extends State<PickerRegion>
+class PickerRegionState extends State<PickerRegion>
     with WidgetsBindingObserver {
   final region = GlobalKey();
   Completer<Object?>? pending;
@@ -37,6 +38,12 @@ class _PickerRegionState extends State<PickerRegion>
     pending?.complete(value);
     pending = null;
     if (mounted && panel != null) setState(() => panel = null);
+  }
+
+  bool dismissIfOpen() {
+    if (panel == null) return false;
+    close();
+    return true;
   }
 
   @override
@@ -76,54 +83,62 @@ class _PickerRegionState extends State<PickerRegion>
                   ? below
                   : anchor.top - popupHeight - 4)
               .clamp(8.0, math.max(8.0, size.height - popupHeight - 8));
-      return Stack(
-        key: region,
-        clipBehavior: Clip.hardEdge,
-        children: [
-          Positioned.fill(
-            child: NotificationListener<ScrollNotification>(
-              onNotification: (n) {
-                if (panel != null &&
-                    (n is ScrollStartNotification ||
-                        n is ScrollUpdateNotification)) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) => close());
-                }
-                return false;
-              },
-              child: widget.child,
-            ),
-          ),
-          if (panel != null) ...[
+      return PopScope(
+        canPop: !widget.handleBack || panel == null,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && widget.handleBack) close();
+        },
+        child: Stack(
+          key: region,
+          clipBehavior: Clip.hardEdge,
+          children: [
             Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: close,
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (panel != null &&
+                      (n is ScrollStartNotification ||
+                          n is ScrollUpdateNotification)) {
+                    WidgetsBinding.instance.addPostFrameCallback(
+                      (_) => close(),
+                    );
+                  }
+                  return false;
+                },
+                child: widget.child,
               ),
             ),
-            Positioned(
-              left: left.toDouble(),
-              top: top.toDouble(),
-              width: width,
-              height: popupHeight,
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape): close,
-                },
-                child: Focus(
-                  autofocus: true,
-                  child: Material(
-                    key: const ValueKey('field-picker'),
-                    elevation: 4,
-                    color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(12),
-                    clipBehavior: Clip.antiAlias,
-                    child: SingleChildScrollView(child: panel),
+            if (panel != null) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: close,
+                ),
+              ),
+              Positioned(
+                left: left.toDouble(),
+                top: top.toDouble(),
+                width: width,
+                height: popupHeight,
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.escape): close,
+                  },
+                  child: Focus(
+                    autofocus: true,
+                    child: Material(
+                      key: const ValueKey('field-picker'),
+                      elevation: 4,
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(12),
+                      clipBehavior: Clip.antiAlias,
+                      child: SingleChildScrollView(child: panel),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       );
     },
   );
@@ -134,7 +149,7 @@ Future<T?> _open<T>(
   Widget Function(ValueChanged<T?>) builder,
   double height,
 ) async {
-  final region = context.findAncestorStateOfType<_PickerRegionState>();
+  final region = context.findAncestorStateOfType<PickerRegionState>();
   if (region != null) {
     return await region.open(context, (close) => builder(close), height) as T?;
   }

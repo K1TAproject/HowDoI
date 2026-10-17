@@ -1,6 +1,7 @@
 ﻿param([string]$Job, [switch]$Inspect)
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+# Only inspection emits stdout; the background installer uses status files.
+if ($Inspect) { [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false) }
 
 function Get-UpdateHash([string]$path) {
     $stream = [IO.File]::OpenRead($path)

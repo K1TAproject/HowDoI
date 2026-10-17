@@ -84,7 +84,7 @@ void main() {
     },
   );
   test('full version remains available for update checks', () async {
-    expect(await appVersion(), '0.1.7+8');
+    expect(await appVersion(), '0.1.8+9');
   });
 
   for (final width in [1440.0, 700.0]) {
@@ -107,8 +107,7 @@ void main() {
         await t.tap(find.text('预备工作'));
         await t.pumpAndSettle();
         if (width < 800) {
-          Navigator.of(t.element(find.byType(Drawer))).pop();
-          await t.pumpAndSettle();
+          expect(find.byType(Drawer), findsNothing);
         }
         for (final title in ['护照', '行李', '保险']) {
           await t.enterText(find.byType(TextField), title);

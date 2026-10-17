@@ -218,6 +218,7 @@ class PreparationEditor extends StatefulWidget {
 }
 
 class PreparationEditorState extends State<PreparationEditor> {
+  final pickerKey = GlobalKey<PickerRegionState>();
   late Record originalTrip = widget.trip;
   late Map<String, dynamic> original = widget.store
       .preparations(originalTrip)
@@ -259,6 +260,7 @@ class PreparationEditorState extends State<PreparationEditor> {
   }
 
   Future<bool> mayLeave() async {
+    if (pickerKey.currentState?.dismissIfOpen() ?? false) return false;
     if (jsonEncode(value()) == jsonEncode(original)) return true;
     final answer = await showDialog<String>(
       context: context,
@@ -310,6 +312,8 @@ class PreparationEditorState extends State<PreparationEditor> {
       ),
       Expanded(
         child: PickerRegion(
+          key: pickerKey,
+          handleBack: false,
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             children: [

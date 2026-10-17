@@ -258,6 +258,7 @@ class ItemEditor extends StatefulWidget {
 }
 
 class ItemEditorState extends State<ItemEditor> {
+  final pickerKey = GlobalKey<PickerRegionState>();
   int? openedModified;
   late String initialValue;
   late int tripModified;
@@ -444,6 +445,7 @@ class ItemEditorState extends State<ItemEditor> {
   }
 
   Future<bool> mayLeave() async {
+    if (pickerKey.currentState?.dismissIfOpen() ?? false) return false;
     if (initialValue == jsonEncode(value())) return true;
     final answer = await showDialog<String>(
       context: context,
@@ -692,6 +694,8 @@ class ItemEditorState extends State<ItemEditor> {
         ),
         Expanded(
           child: PickerRegion(
+            key: pickerKey,
+            handleBack: false,
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [

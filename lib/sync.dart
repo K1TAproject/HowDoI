@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'model.dart';
 import 'store.dart';
 import 'editors.dart';
@@ -58,7 +60,12 @@ class SyncService extends ChangeNotifier {
   HttpServer? _server;
   RawDatagramSocket? _discovery;
   Timer? _timer;
+  Timer? _saveTimer;
+  Future<void>? _starting;
+  int _epoch = 0;
+  final _clients = <HttpClient>{};
   DateTime? _last;
+  DateTime? get lastSuccess => _last;
   int _syncedGeneration = -1;
   Map<String, dynamic>? identity, peer;
   SyncService(this.store, {required this.host, this.port = 47821}) {
@@ -70,7 +77,13 @@ class SyncService extends ChangeNotifier {
   }
 
   void _changed() {
-    if (enabled && store.generation != _syncedGeneration) _status('有修改待同步');
+    if (enabled && store.generation != _syncedGeneration) {
+      _status('有修改待同步');
+      if (!host) {
+        _saveTimer?.cancel();
+        _saveTimer = Timer(const Duration(milliseconds: 600), tick);
+      }
+    }
   }
 
   Future<void> restore() async {
@@ -83,18 +96,25 @@ class SyncService extends ChangeNotifier {
       if (savedPeer != null && savedPeer.isNotEmpty) {
         peer = Map<String, dynamic>.from(jsonDecode(savedPeer));
       }
+      _last = DateTime.tryParse(store.setting('sync.lastSuccess') ?? '');
       if (store.setting('sync.enabled') == 'true') await start();
     } catch (e) {
       _status('同步未启动：$e');
     }
   }
 
-  Future<void> start() async {
+  Future<void> start() =>
+      _starting ??= _start().whenComplete(() => _starting = null);
+
+  Future<void> _start() async {
     if (enabled) return;
+    final epoch = _epoch;
     if (host) {
       if (identity == null) {
         _status('正在生成本机配对凭据…');
-        identity = await compute(makeIdentity, null);
+        final generated = await compute(makeIdentity, null);
+        if (epoch != _epoch || _disposed) return;
+        identity = generated;
         store.setSetting('sync.identity', jsonEncode(identity));
       }
       final context = SecurityContext();
@@ -105,6 +125,11 @@ class SyncService extends ChangeNotifier {
         port,
         context,
       );
+      if (epoch != _epoch || _disposed) {
+        await _server?.close(force: true);
+        _server = null;
+        return;
+      }
       _server!.listen(_serve, onError: (Object e) => _status('同步连接失败：$e'));
       try {
         _discovery = await RawDatagramSocket.bind(
@@ -156,26 +181,28 @@ class SyncService extends ChangeNotifier {
         return;
       }
       if (request.method != 'POST' ||
-          !['/sync', '/ack'].contains(request.uri.path)) {
+          !['/hello', '/sync', '/ack'].contains(request.uri.path)) {
         request.response.statusCode = 404;
         return;
       }
-      final text = await limitedBody(request);
+      final text = await limitedBody(
+        request,
+      ).timeout(const Duration(seconds: 20));
       if (!active) {
         request.response.statusCode = 503;
         return;
       }
+      request.response.headers.set(
+        'x-howdoi-time',
+        DateTime.now().millisecondsSinceEpoch,
+      );
       if (request.uri.path == '/ack') {
         final ack = jsonDecode(text);
         final digest = sha256
             .convert(utf8.encode(store.export(sync: true)))
             .toString();
         if (ack is Map && ack['digest'] == digest) {
-          _syncedGeneration = store.generation;
-          _last = DateTime.now();
-          _status(
-            '已同步 · ${_last!.hour.toString().padLeft(2, '0')}:${_last!.minute.toString().padLeft(2, '0')}',
-          );
+          _success();
         }
         request.response.write(
           jsonEncode({'synced': ack is Map && ack['digest'] == digest}),
@@ -185,7 +212,7 @@ class SyncService extends ChangeNotifier {
       final envelope = jsonDecode(text);
       if (envelope is Map && envelope['version'] != 3) {
         request.response.statusCode = 409;
-        request.response.write('数据版本不兼容，请使用支持 0.1.2 数据的客户端；未合并任何记录');
+        request.response.write('数据协议不兼容，请更新两端应用；未合并任何记录');
         _status('旧版客户端不兼容 · 请更新两端版本');
         return;
       }
@@ -194,6 +221,11 @@ class SyncService extends ChangeNotifier {
           (DateTime.now().millisecondsSinceEpoch - clock).abs() > 300000) {
         request.response.statusCode = 409;
         request.response.write('设备时间相差超过五分钟，请校准');
+        _status('同步失败 · 设备时间相差超过五分钟，请校准');
+        return;
+      }
+      if (request.uri.path == '/hello') {
+        request.response.write(jsonEncode({'app': 'howdoi', 'version': 3}));
         return;
       }
       final rows = decodeRecords(text, format: 'howdoi-sync');
@@ -206,16 +238,23 @@ class SyncService extends ChangeNotifier {
       request.response.headers.contentType = ContentType.json;
       request.response.write(store.export(sync: true));
       _status('已接收 · 等待手机确认');
-    } catch (e) {
+    } on FormatException catch (e) {
       request.response.statusCode = 400;
-      request.response.write('数据未合并：${e.runtimeType}');
+      request.response.write(
+        e.message.contains('时间') ? '记录时间超前，请校准设备时间；未合并记录' : '数据未合并，请检查备份格式',
+      );
+      _status(e.message.contains('时间') ? '同步失败 · 记录时间超前，请校准设备时间' : '同步数据校验失败');
+    } catch (_) {
+      request.response.statusCode = 400;
       _status('同步数据校验失败');
     } finally {
       await request.response.close();
     }
   }
 
-  Future<String?> discover() async {
+  Future<String?> discover([Map<String, dynamic>? target]) async {
+    target ??= peer;
+    final senders = <RawDatagramSocket>[];
     RawDatagramSocket? socket;
     try {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
@@ -228,7 +267,7 @@ class SyncService extends ChangeNotifier {
             try {
               final m = jsonDecode(utf8.decode(packet.data));
               if (m['app'] == 'howdoi' &&
-                  m['fingerprint'] == peer!['fingerprint'] &&
+                  m['fingerprint'] == target!['fingerprint'] &&
                   !found.isCompleted) {
                 found.complete(packet.address.address);
               }
@@ -236,6 +275,39 @@ class SyncService extends ChangeNotifier {
           }
         }
       });
+      // Bind broadcasts to each interface so a VPN's default route does not
+      // prevent discovery on the physical Wi-Fi interface.
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+      );
+      for (final address in interfaces.expand((i) => i.addresses)) {
+        RawDatagramSocket? sender;
+        try {
+          sender = await RawDatagramSocket.bind(address, 0);
+          sender.broadcastEnabled = true;
+          sender.listen((event) {
+            if (event != RawSocketEvent.read) return;
+            final packet = sender?.receive();
+            if (packet == null) return;
+            try {
+              final m = jsonDecode(utf8.decode(packet.data));
+              if (m['app'] == 'howdoi' &&
+                  m['fingerprint'] == target!['fingerprint'] &&
+                  !found.isCompleted) {
+                found.complete(packet.address.address);
+              }
+            } catch (_) {}
+          });
+          sender.send(
+            utf8.encode('howdoi-discover-v1'),
+            InternetAddress('255.255.255.255'),
+            47822,
+          );
+          senders.add(sender);
+        } catch (_) {
+          sender?.close();
+        }
+      }
       socket.send(
         utf8.encode('howdoi-discover-v1'),
         InternetAddress('255.255.255.255'),
@@ -249,45 +321,68 @@ class SyncService extends ChangeNotifier {
       return null;
     } finally {
       socket?.close();
+      for (final sender in senders) {
+        sender.close();
+      }
     }
   }
 
-  Future<String> _post(String path, String body) async {
+  Future<String> _post(
+    String path,
+    String body, [
+    Map<String, dynamic>? target,
+  ]) async {
+    target ??= peer!;
     final client = HttpClient(
       context: SecurityContext(withTrustedRoots: false),
     );
+    _clients.add(client);
     client.connectionTimeout = const Duration(seconds: 4);
     client.badCertificateCallback = (cert, host, port) =>
-        sha256.convert(cert.der).toString() == peer!['fingerprint'];
+        sha256.convert(cert.der).toString() == target!['fingerprint'];
     try {
-      final req = await client.postUrl(
-        Uri(
-          scheme: 'https',
-          host: peer!['host'],
-          port: peer!['port'],
-          path: path,
-        ),
-      );
+      final req = await client
+          .postUrl(
+            Uri(
+              scheme: 'https',
+              host: target['host'],
+              port: target['port'],
+              path: path,
+            ),
+          )
+          .timeout(const Duration(seconds: 5));
+      req.followRedirects = false;
       // No trusted roots: TLS proceeds only if the callback matches the paired
       // certificate fingerprint before any credentials are transmitted.
       req.headers.set(
         HttpHeaders.authorizationHeader,
-        'Bearer ${peer!['token']}',
+        'Bearer ${target['token']}',
       );
       req.headers.contentType = ContentType.json;
       req.write(body);
       final response = await req.close().timeout(const Duration(seconds: 20));
-      final text = await limitedBody(response);
+      final text = await limitedBody(
+        response,
+      ).timeout(const Duration(seconds: 20));
+      if (path == '/hello' && response.statusCode == 404) {
+        throw const FormatException('电脑版本不支持安全配对，请先更新电脑应用');
+      }
       if (response.statusCode != 200) {
         throw HttpException(
-          response.statusCode == 409
+          response.statusCode == 409 || response.statusCode == 400
               ? text
               : '连接被拒绝（${response.statusCode}），请核对配对信息',
         );
       }
+      final clock = int.tryParse(response.headers.value('x-howdoi-time') ?? '');
+      if (clock == null) throw const FormatException('电脑版本不支持安全配对，请先更新电脑应用');
+      if ((DateTime.now().millisecondsSinceEpoch - clock).abs() > 300000) {
+        throw const FormatException('设备时间相差超过五分钟，请校准');
+      }
       return text;
     } finally {
       client.close(force: true);
+      _clients.remove(client);
     }
   }
 
@@ -303,6 +398,8 @@ class SyncService extends ChangeNotifier {
       return;
     }
     busy = true;
+    final epoch = _epoch;
+    _status('连接中${store.generation != _syncedGeneration ? ' · 有修改待同步' : ''}');
     try {
       final snapshot =
           jsonDecode(store.export(sync: true)) as Map<String, dynamic>;
@@ -310,14 +407,21 @@ class SyncService extends ChangeNotifier {
       String response;
       try {
         response = await _post('/sync', jsonEncode(snapshot));
-      } on SocketException {
+      } catch (e) {
+        if (e is! SocketException &&
+            e is! TimeoutException &&
+            e is! HandshakeException) {
+          rethrow;
+        }
         final address = await discover();
-        if (address == null) rethrow;
-        peer!['host'] = address;
-        store.setSetting('sync.peer', jsonEncode(peer));
-        response = await _post('/sync', jsonEncode(snapshot));
+        if (address == null || epoch != _epoch || !active) rethrow;
+        final candidate = {...peer!, 'host': address};
+        response = await _post('/sync', jsonEncode(snapshot), candidate);
+        if (epoch != _epoch || !active) return;
+        peer = candidate;
+        store.setSetting('sync.peer', jsonEncode(candidate));
       }
-      if (!active) return;
+      if (!active || epoch != _epoch || _disposed) return;
       final rows = decodeRecords(response, format: 'howdoi-sync');
       if (rows.any(
         (r) => r.modified > DateTime.now().microsecondsSinceEpoch + 300000000,
@@ -341,27 +445,42 @@ class SyncService extends ChangeNotifier {
             }),
           ),
         );
+        if (!active || epoch != _epoch || _disposed) return;
         if (store.generation == generation && acknowledged['synced'] == true) {
-          _syncedGeneration = generation;
-          _last = DateTime.now();
-          _status(
-            '已同步 · ${_last!.hour.toString().padLeft(2, '0')}:${_last!.minute.toString().padLeft(2, '0')}',
-          );
+          _success();
+        } else {
+          _status('有修改待同步');
         }
       } else {
         _status('有修改待同步');
       }
     } catch (e) {
-      _status('设备未连接 / 同步失败：$e');
+      if (epoch == _epoch && !_disposed) {
+        _status(
+          '${syncError(e)}${store.generation != _syncedGeneration ? ' · 有修改待同步' : ''}',
+        );
+      }
     } finally {
       busy = false;
     }
+  }
+
+  void _success() {
+    _syncedGeneration = store.generation;
+    _last = DateTime.now();
+    store.setSetting('sync.lastSuccess', _last!.toIso8601String());
+    _status(
+      '已同步 · ${_last!.hour.toString().padLeft(2, '0')}:${_last!.minute.toString().padLeft(2, '0')}',
+    );
   }
 
   Future<String> pairingText() async {
     if (!enabled) await start();
     final addresses = await NetworkInterface.list(
       type: InternetAddressType.IPv4,
+    );
+    addresses.sort(
+      (a, b) => interfacePriority(a).compareTo(interfacePriority(b)),
     );
     final address =
         addresses
@@ -377,31 +496,117 @@ class SyncService extends ChangeNotifier {
       'port': _server!.port,
       'fingerprint': identity!['fingerprint'],
       'token': identity!['token'],
+      'addresses': addresses
+          .expand((i) => i.addresses)
+          .where((a) => !a.isLoopback)
+          .map((a) => a.address)
+          .take(8)
+          .toList(),
     });
   }
 
   Future<void> pair(String text) async {
-    final m = jsonDecode(text);
+    if (busy) throw const FormatException('正在同步，请稍后再试');
+    final m = parsePairing(text);
+    final epoch = _epoch;
+    busy = true;
+    _status('连接中 · 正在验证电脑身份');
+    var candidate = Map<String, dynamic>.from(m);
+    try {
+      final body = jsonEncode({
+        'version': 3,
+        'sentAt': DateTime.now().millisecondsSinceEpoch,
+      });
+      String response;
+      try {
+        response = await _post('/hello', body, candidate);
+      } catch (e) {
+        if (e is! SocketException &&
+            e is! TimeoutException &&
+            e is! HandshakeException) {
+          rethrow;
+        }
+        final discovered = await discover(candidate);
+        final addresses = <String>{
+          ?discovered,
+          ...((m['addresses'] as List?) ?? []).whereType<String>(),
+        }.take(8);
+        String? result;
+        for (final address in addresses) {
+          if (epoch != _epoch || _disposed) {
+            throw const FormatException('配对已取消');
+          }
+          candidate = {...m, 'host': address};
+          try {
+            result = await _post('/hello', body, candidate);
+            break;
+          } on SocketException {
+            continue;
+          } on TimeoutException {
+            continue;
+          } on HandshakeException {
+            continue;
+          }
+        }
+        if (result == null) rethrow;
+        response = result;
+      }
+      final hello = jsonDecode(response);
+      if (hello is! Map || hello['app'] != 'howdoi' || hello['version'] != 3) {
+        throw const FormatException('数据协议不兼容，请更新两端应用');
+      }
+      if (epoch != _epoch || _disposed) throw const FormatException('配对已取消');
+      peer = candidate;
+      store.setSetting('sync.peer', jsonEncode(peer));
+    } catch (e) {
+      if (epoch == _epoch && !_disposed) _status(syncError(e));
+      rethrow;
+    } finally {
+      busy = false;
+    }
+    if (!enabled) {
+      await start();
+    } else {
+      await tick();
+    }
+  }
+
+  static Map<String, dynamic> parsePairing(String text) {
+    dynamic m;
+    try {
+      m = jsonDecode(text);
+    } catch (_) {
+      throw const FormatException('不是有效的 HowDoI 配对二维码或文本');
+    }
     if (m is! Map ||
         m['app'] != 'howdoi-pair' ||
         m['version'] != 1 ||
         m['host'] is! String ||
+        InternetAddress.tryParse(m['host']) == null ||
         m['port'] is! int ||
         m['port'] < 1 ||
         m['port'] > 65535 ||
         m['fingerprint'] is! String ||
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(m['fingerprint']) ||
         m['token'] is! String ||
-        m['token'].length < 40) {
+        !RegExp(r'^[A-Za-z0-9_=-]{40,128}$').hasMatch(m['token']) ||
+        (m['addresses'] != null &&
+            (m['addresses'] is! List ||
+                m['addresses'].length > 8 ||
+                (m['addresses'] as List).any(
+                  (a) => a is! String || InternetAddress.tryParse(a) == null,
+                )))) {
       throw const FormatException('配对文本无效');
     }
-    await stop();
-    peer = Map<String, dynamic>.from(m);
-    store.setSetting('sync.peer', jsonEncode(peer));
-    await start();
+    return Map<String, dynamic>.from(m);
   }
 
   Future<void> stop() async {
+    _epoch++;
+    for (final client in _clients.toList()) {
+      client.close(force: true);
+    }
+    _saveTimer?.cancel();
     enabled = false;
     store.setSetting('sync.enabled', 'false');
     _timer?.cancel();
@@ -424,7 +629,12 @@ class SyncService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _epoch++;
     _disposed = true;
+    _saveTimer?.cancel();
+    for (final client in _clients.toList()) {
+      client.close(force: true);
+    }
     _timer?.cancel();
     _discovery?.close();
     _server?.close(force: true);
@@ -433,13 +643,77 @@ class SyncService extends ChangeNotifier {
   }
 }
 
-Future<void> showSyncDialog(BuildContext context, SyncService sync) async {
+int interfacePriority(NetworkInterface i) {
+  if (RegExp(
+    r'vpn|virtual|vmware|vbox|vethernet|docker|tun|tap',
+    caseSensitive: false,
+  ).hasMatch(i.name)) {
+    return 2;
+  }
+  return i.addresses.any(
+        (a) =>
+            a.address.startsWith('192.168.') ||
+            a.address.startsWith('10.') ||
+            a.address.startsWith('172.'),
+      )
+      ? 0
+      : 1;
+}
+
+String syncError(Object e) {
+  if (e is HandshakeException) return '同步失败 · 证书指纹不匹配，请核对电脑并重新扫码';
+  if (e is SocketException || e is TimeoutException) {
+    return '离线 · 无法连接电脑，请检查同一 Wi-Fi、电脑运行状态与专用网络防火墙';
+  }
+  if (e is FormatException) return '同步失败 · ${e.message}';
+  if (e is HttpException) return '同步失败 · ${e.message}';
+  return '同步失败 · 请重试，已有数据保留';
+}
+
+Future<void> showSyncDialog(BuildContext context, SyncService sync) =>
+    showDialog<void>(
+      context: context,
+      builder: (_) => _SyncDialog(sync: sync),
+    );
+
+class _SyncDialog extends StatefulWidget {
+  final SyncService sync;
+  const _SyncDialog({required this.sync});
+  @override
+  State<_SyncDialog> createState() => _SyncDialogState();
+}
+
+class _SyncDialogState extends State<_SyncDialog> {
   final text = TextEditingController();
-  String? error;
-  await formDialog<void>(
-    context: context,
-    builder: (c) => StatefulBuilder(
-      builder: (c, set) => AlertDialog(
+  String? error, qr;
+  bool working = false;
+  SyncService get sync => widget.sync;
+  @override
+  void dispose() {
+    text.dispose();
+    super.dispose();
+  }
+
+  Future<void> run(Future<void> Function() action) async {
+    setState(() {
+      working = true;
+      error = null;
+    });
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) setState(() => error = syncError(e));
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: sync,
+    builder: (c, _) => PopScope(
+      canPop: !working,
+      child: AlertDialog(
         title: const Text('设备同步'),
         content: SizedBox(
           width: 520,
@@ -448,55 +722,102 @@ Future<void> showSyncDialog(BuildContext context, SyncService sync) async {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(sync.status),
+                Text(sync.status, semanticsLabel: '同步状态：${sync.status}'),
+                if (sync.lastSuccess != null)
+                  Text(
+                    '最近确认同步：${sync.lastSuccess!.toLocal().toString().split('.').first}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 const SizedBox(height: 12),
-                Text(
-                  sync.host
-                      ? '电脑和手机需处于同一 Wi-Fi 或热点。点击生成，将完整配对文本安全地传到自己的手机。文本含连接凭据，请勿公开。'
-                      : '从电脑获取配对文本，粘贴到这里。之后双方打开应用时自动同步。',
+                const Text(
+                  '同步自己的全部旅行。两端保留本地数据，断网仍可编辑；连接后整条记录以最新更新为准。准备清单整体属于旅行记录，两端离线同时修改可能互相覆盖。仅保存后的内容参与同步。',
                 ),
                 const SizedBox(height: 12),
+                if (sync.host)
+                  OutlinedButton.icon(
+                    onPressed: working
+                        ? null
+                        : () => run(() async {
+                            final value = await sync.pairingText();
+                            if (mounted) {
+                              setState(() {
+                                qr = value;
+                                text.text = value;
+                              });
+                            }
+                          }),
+                    icon: const Icon(Icons.qr_code),
+                    label: const Text('连接手机'),
+                  ),
+                if (qr != null && sync.enabled) ...[
+                  Center(
+                    child: Semantics(
+                      label: '手机扫描此码连接电脑',
+                      child: Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.all(12),
+                        child: QrImageView(
+                          data: qr!,
+                          size: 250,
+                          backgroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Text('二维码和配对文本包含连接凭据，请勿公开。'),
+                ],
+                if (!sync.host && Platform.isAndroid)
+                  FilledButton.icon(
+                    onPressed: working || sync.busy
+                        ? null
+                        : () async {
+                            final value = await Navigator.of(context)
+                                .push<String>(
+                                  MaterialPageRoute(
+                                    builder: (_) => const _PairScanner(),
+                                  ),
+                                );
+                            if (value != null && mounted) {
+                              await run(() => sync.pair(value));
+                            }
+                          },
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('扫描电脑二维码'),
+                  ),
+                ExpansionTile(
+                  title: const Text('文本配对备用入口'),
+                  children: [
+                    Input('配对文本（请勿公开）', text, lines: 5),
+                    if (sync.host)
+                      TextButton(
+                        onPressed: text.text.isEmpty
+                            ? null
+                            : () async {
+                                await Clipboard.setData(
+                                  ClipboardData(text: text.text),
+                                );
+                                if (c.mounted) notice(c, '已复制，请勿公开配对文本');
+                              },
+                        child: const Text('复制配对文本'),
+                      )
+                    else
+                      FilledButton(
+                        onPressed: working || sync.busy
+                            ? null
+                            : () => run(() => sync.pair(text.text.trim())),
+                        child: const Text('验证配对并同步'),
+                      ),
+                  ],
+                ),
+                if (working) const LinearProgressIndicator(),
                 if (error != null)
                   Text(
                     error!,
                     style: TextStyle(color: Theme.of(c).colorScheme.error),
                   ),
-                Input('配对文本（可以修改 host 为电脑的局域网 IP）', text, lines: 6),
-                if (sync.host)
-                  OutlinedButton(
-                    onPressed: () async {
-                      try {
-                        final value = await sync.pairingText();
-                        if (c.mounted) set(() => text.text = value);
-                      } catch (e) {
-                        if (c.mounted) set(() => error = '$e');
-                      }
-                    },
-                    child: const Text('生成 / 查看配对文本'),
-                  ),
-                if (sync.host)
-                  TextButton(
-                    onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: text.text));
-                      if (c.mounted) notice(c, '已复制配对文本，请勿公开');
-                    },
-                    child: const Text('复制'),
-                  ),
-                if (!sync.host)
-                  FilledButton(
-                    onPressed: () async {
-                      try {
-                        await sync.pair(text.text.trim());
-                        if (c.mounted) set(() => error = sync.status);
-                      } catch (e) {
-                        if (c.mounted) set(() => error = '$e');
-                      }
-                    },
-                    child: const Text('配对并同步'),
-                  ),
                 const SizedBox(height: 12),
                 const Text(
-                  '自动发现失败时可修改文本中的 host 地址。网络隔离或防火墙阻止时无法连接；无需关闭防火墙，仅允许本应用访问可信专用网络。',
+                  '电脑和手机连接同一 Wi-Fi。电脑保持运行即可，可最小化；手机在前台时自动同步。无需关闭防火墙，仅允许 HowDoI 访问可信专用网络（TCP 47821、UDP 47822）。访客网络、AP 隔离或 VPN 可能阻止连接。',
                   style: TextStyle(fontSize: 12),
                 ),
               ],
@@ -505,38 +826,90 @@ Future<void> showSyncDialog(BuildContext context, SyncService sync) async {
         ),
         actions: [
           TextButton(
-            onPressed: () async {
-              await sync.stop();
-              if (c.mounted) set(() {});
-            },
+            onPressed: working ? null : () => run(sync.stop),
             child: const Text('关闭同步'),
           ),
           TextButton(
-            onPressed: () async {
-              await sync.revoke();
-              if (c.mounted) set(() => text.clear());
-            },
+            onPressed: working
+                ? null
+                : () => run(() async {
+                    await sync.revoke();
+                    qr = null;
+                    text.clear();
+                  }),
             child: const Text('撤销配对'),
           ),
           TextButton(
-            onPressed: () async {
-              try {
-                await sync.start();
-                await sync.tick();
-                if (c.mounted) set(() => error = sync.status);
-              } catch (e) {
-                if (c.mounted) set(() => error = '$e');
-              }
-            },
-            child: const Text('重新连接'),
+            onPressed: working || sync.busy
+                ? null
+                : () => run(() async {
+                    if (!sync.enabled) {
+                      await sync.start();
+                    } else {
+                      await sync.tick();
+                    }
+                  }),
+            child: const Text('立即同步 / 重试'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(c),
-            child: const Text('完成'),
+            onPressed: working ? () => sync.stop() : () => Navigator.pop(c),
+            child: Text(working ? '取消连接' : '完成'),
           ),
         ],
       ),
     ),
   );
-  text.dispose();
+}
+
+class _PairScanner extends StatefulWidget {
+  const _PairScanner();
+  @override
+  State<_PairScanner> createState() => _PairScannerState();
+}
+
+class _PairScannerState extends State<_PairScanner> {
+  bool handled = false;
+  String? error;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('扫描电脑二维码')),
+    body: SafeArea(
+      child: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('仅用于扫描 HowDoI 配对二维码；不拍照、不保存图像。'),
+          ),
+          Expanded(
+            child: MobileScanner(
+              onDetect: (capture) {
+                if (handled) return;
+                final value = capture.barcodes.firstOrNull?.rawValue;
+                if (value == null) return;
+                try {
+                  SyncService.parsePairing(value);
+                  handled = true;
+                  Navigator.pop(context, value);
+                } catch (_) {
+                  setState(() => error = '无效二维码，请扫描电脑“连接手机”页面的二维码');
+                }
+              },
+              errorBuilder: (context, error) => const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('相机不可用或权限被拒绝。可返回使用文本配对；也可在系统应用权限中允许相机后重试。'),
+                ),
+              ),
+            ),
+          ),
+          if (error != null)
+            Padding(padding: const EdgeInsets.all(12), child: Text(error!)),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('返回，使用文本配对'),
+          ),
+        ],
+      ),
+    ),
+  );
 }

@@ -249,8 +249,7 @@ void main() {
         await t.tap(find.text('旅行总览'));
         await t.pumpAndSettle();
         if (width < 800) {
-          Navigator.of(t.element(find.byType(Drawer))).pop();
-          await t.pumpAndSettle();
+          expect(find.byType(Drawer), findsNothing);
         }
         expect(find.text('旅行跨度 1 天'), findsOneWidget);
         await t.scrollUntilVisible(

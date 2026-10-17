@@ -168,8 +168,7 @@ void main() {
       await tester.tap(find.text('旅行总览'));
       await tester.pumpAndSettle();
       if (width < 800) {
-        Navigator.of(tester.element(find.byType(Drawer))).pop();
-        await tester.pumpAndSettle();
+        expect(find.byType(Drawer), findsNothing);
       }
       await capture('overview');
       await tester.scrollUntilVisible(
@@ -186,8 +185,7 @@ void main() {
       await tester.tap(find.text('预备工作'));
       await tester.pumpAndSettle();
       if (width < 800) {
-        Navigator.of(tester.element(find.byType(Drawer))).pop();
-        await tester.pumpAndSettle();
+        expect(find.byType(Drawer), findsNothing);
       }
       await capture('preparations');
       await tester.tap(find.text('检查护照有效期'));

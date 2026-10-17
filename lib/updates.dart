@@ -426,16 +426,30 @@ Future<void> handOffInstaller({
     helper.path,
     '-Job',
     job.path,
-  ], mode: ProcessStartMode.detached);
+  ]);
+  // Windows PowerShell can stall before evaluating -File with DETACHED_PROCESS.
+  // Normal mode supplies valid standard handles. exit(0) below ends only this
+  // application; the helper keeps running and waits for our PID to disappear.
+  await process.stdin.close();
+  process.stdout.drain<void>();
+  final errors = StringBuffer();
+  process.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen((s) {
+    if (errors.length < 4096) errors.write(s);
+  });
+  int? exitCode;
+  process.exitCode.then((code) => exitCode = code);
   for (var i = 0; i < 100; i++) {
     if (await ready.exists()) {
       await ready.delete();
       return;
     }
+    if (exitCode != null) break;
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
   Process.killPid(process.pid);
-  throw StateError('安装助手未就绪，当前程序未关闭');
+  throw StateError(
+    '安装助手未就绪，当前程序已保留${exitCode == null ? '（启动超时）' : '（退出码 $exitCode）'}${errors.isEmpty ? '' : '\n$errors'}',
+  );
 }
 
 class UpdateDialog extends StatefulWidget {

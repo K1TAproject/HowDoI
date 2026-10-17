@@ -1,6 +1,6 @@
 # HowDoI
 
-离线旅行路书。当前版本为 Windows 0.1.7，新增旅行总览，集中查看按天行程、地点顺序和原币种预算组成；安卓新版适配暂缓。
+离线旅行路书。当前版本为 Windows / Android 0.1.8，复用同一套旅行、总览、准备清单及预算功能，支持同一 Wi-Fi 扫码配对与双向同步。
 
 支持灵活旅行日期、紧凑时间线、自动标题、详细交通与多晚住宿、当地票面时间、完成勾选和备注。当前只记录预计费用；SPSir 实际开支联动暂不实现。
 
@@ -18,7 +18,7 @@
 
 本地运行产物位于 `dist/`（不纳入 Git）。本版数据协议为 3，不与旧客户端同步；可导入格式 1、2、3 的备份。主动添加的空白日会保留。发布包需单独上传 GitHub Releases，普通 git push 不会发布安装包。
 
-Windows 推荐使用 `dist/HowDoI-0.1.7-windows-x64-setup.exe` 中文安装向导，无需解压；同时保留 ZIP 便携包用于手动部署和应用内更新。安装包构建命令为 `scripts/Build-Installer.ps1`，安装/卸载验证命令为 `scripts/Test-Installer.ps1`。
+Windows 推荐使用 `dist/HowDoI-0.1.8-windows-x64-setup.exe` 中文安装向导，无需解压；同时保留 ZIP 便携包用于手动部署和应用内更新。安装包构建命令为 `scripts/Build-Installer.ps1`，安装/卸载验证命令为 `scripts/Test-Installer.ps1`。
 
 ## 项目文档
 
@@ -28,3 +28,5 @@ Windows 推荐使用 `dist/HowDoI-0.1.7-windows-x64-setup.exe` 中文安装向�
 - [Git 使用说明](GIT使用说明.md)
 
 SPSir 接口仍是后续参考设计，不代表已有跨应用记账能力。
+
+Android 安装包：`dist/HowDoI-0.1.8-android-arm64.apk`；构建命令 `scripts/Build-Android.ps1`，沿用本地已有签名。签名与密码仅保存在 Git 忽略的 `.local/`，请自行离线备份，不要提交仓库。首次手机测试保持空白数据，通过扫码同步获取旅行。详见[使用说明](docs/使用说明.md)。
