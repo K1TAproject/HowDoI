@@ -1,3 +1,6 @@
+import 'places.dart';
+import 'external_binding.dart';
+import 'share_inbox.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
@@ -48,6 +51,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    if (Platform.isAndroid) {
+      store.db.execute(
+        "DELETE FROM settings WHERE key LIKE 'mapSearch:%' OR key = 'mapSearchEndpoint'",
+      );
+      MapShareInbox.instance.addListener(changed);
+      MapShareInbox.instance.start();
+    }
     tripId = store.setting('selectedTrip');
     day = int.tryParse(store.setting('selectedDay') ?? '1') ?? 1;
     store.addListener(changed);
@@ -63,6 +73,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    MapShareInbox.instance.removeListener(changed);
     store.removeListener(changed);
     widget.sync.removeListener(changed);
     WidgetsBinding.instance.removeObserver(this);
@@ -192,7 +203,122 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> openEditor(Record trip, Record? item, bool wide) async {
+  Future<void> sharedTarget() async {
+    String? selectedTrip, selectedItem, selectedSlot;
+    final pending = store.setting('pendingMapBinding');
+    if (pending != null && pending.isNotEmpty) {
+      final p = jsonDecode(pending) as Map;
+      if (store.trips.any((t) => t.id == p['trip'])) selectedTrip = p['trip'];
+      if (selectedTrip != null &&
+          store.items(selectedTrip).any((r) => r.id == p['item'])) {
+        selectedItem = p['item'];
+      }
+      if (selectedItem != null &&
+          placeSlots(store.get(selectedItem)!.data).contains(p['slot'])) {
+        selectedSlot = p['slot'];
+      }
+    }
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: const Text('选择地图链接绑定目标'),
+          content: SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '请重新确认目标。若应用曾被系统回收，未保存草稿无法恢复；这里只读取已保存行程，不会自动覆盖。没有行程时，请先创建行程后再绑定。',
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedTrip,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: '旅行'),
+                    items: [
+                      for (final t in store.trips)
+                        DropdownMenuItem(
+                          value: t.id,
+                          child: Text(t.data['name']),
+                        ),
+                    ],
+                    onChanged: (v) => set(() {
+                      selectedTrip = v;
+                      selectedItem = null;
+                      selectedSlot = null;
+                    }),
+                  ),
+                  if (selectedTrip != null)
+                    DropdownButtonFormField<String>(
+                      key: ValueKey(selectedTrip),
+                      initialValue: selectedItem,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: '行程'),
+                      items: [
+                        for (final r in store.items(selectedTrip!))
+                          DropdownMenuItem(
+                            value: r.id,
+                            child: Text(
+                              '${r.data['name'] == '' ? r.data['type'] : r.data['name']} · 第 ${r.data['day']} 天',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) => set(() {
+                        selectedItem = v;
+                        selectedSlot = null;
+                      }),
+                    ),
+                  if (selectedItem != null)
+                    DropdownButtonFormField<String>(
+                      key: ValueKey(selectedItem),
+                      initialValue: selectedSlot,
+                      decoration: const InputDecoration(labelText: '字段'),
+                      items: [
+                        for (final slot in placeSlots(
+                          store.get(selectedItem!)!.data,
+                        ))
+                          DropdownMenuItem(
+                            value: slot,
+                            child: Text(placeSlotLabel(slot)),
+                          ),
+                      ],
+                      onChanged: (v) => set(() => selectedSlot = v),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: selectedSlot == null
+                  ? null
+                  : () => Navigator.pop(c, true),
+              child: const Text('确认目标'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (accepted == true && mounted) {
+      final item = store.get(selectedItem!), trip = store.get(selectedTrip!);
+      if (item != null && trip != null && !item.deleted && !trip.deleted) {
+        await openEditor(trip, item, false, bindingSlot: selectedSlot);
+      }
+    }
+  }
+
+  Future<void> openEditor(
+    Record trip,
+    Record? item,
+    bool wide, {
+    String? bindingSlot,
+  }) async {
     if (!await leaveEditor() || !mounted) return;
     editingPreparation = false;
     editorKey = GlobalKey<ItemEditorState>();
@@ -217,6 +343,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                   trip: trip,
                   day: day,
                   item: item,
+                  bindingSlot: bindingSlot,
                   onClose: () => Navigator.pop(c),
                 ),
               ),
@@ -1020,6 +1147,18 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             appBar: AppBar(
               title: Text(trip?.data['name'] ?? 'HowDoI'),
               actions: [
+                if (Theme.of(context).platform == TargetPlatform.android)
+                  IconButton(
+                    tooltip: MapShareInbox.instance.value == null
+                        ? '粘贴地图链接 / 选择绑定目标'
+                        : '收到地图分享 · 确认绑定目标',
+                    onPressed: sharedTarget,
+                    icon: Icon(
+                      MapShareInbox.instance.value == null
+                          ? Icons.add_link
+                          : Icons.mark_email_unread,
+                    ),
+                  ),
                 IconButton(
                   tooltip: '关于 / 检查更新',
                   onPressed: about,

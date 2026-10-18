@@ -1,3 +1,4 @@
+import 'map_links.dart';
 import 'dart:convert';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:uuid/uuid.dart';
@@ -284,8 +285,8 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
   if (m is! Map ||
       m['format'] != format ||
       (format == 'howdoi-sync'
-          ? m['version'] != 3
-          : ![1, 2, 3].contains(m['version'])) ||
+          ? m['version'] != 4
+          : ![1, 2, 3, 4].contains(m['version'])) ||
       m['records'] is! List ||
       m['records'].length > 20000) {
     throw const FormatException('不是受支持的 HowDoI 数据文件');
@@ -329,6 +330,27 @@ void validateLocations(dynamic locations) {
   }
   for (final e in locations.entries) {
     final p = e.value;
+    if (p is Map && p.containsKey('url')) {
+      if (!['origin', 'destination', 'place'].contains(e.key) ||
+          p['url'] is! String ||
+          mapLinkProvider(p['url']) != p['provider'] ||
+          mapLinkProvider(p['url']) == null) {
+        throw const FormatException('地图链接或来源无效，请更新两端应用');
+      }
+      for (final key in ['name', 'address', 'sourceText']) {
+        if (p[key] is! String || (p[key] as String).length > 2000) {
+          throw const FormatException('地图链接信息无效');
+        }
+      }
+      if (p['previousPosition'] != null) {
+        if (p['previousPosition'] is! Map ||
+            (p['previousPosition'] as Map).containsKey('url')) {
+          throw const FormatException('历史位置无效');
+        }
+        validateLocations({e.key: p['previousPosition']});
+      }
+      continue;
+    }
     if (!['origin', 'destination', 'place'].contains(e.key) ||
         p is! Map ||
         p['lat'] is! num ||

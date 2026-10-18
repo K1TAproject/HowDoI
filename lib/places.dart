@@ -16,18 +16,23 @@ String placeText(Map<String, dynamic> d, String slot) => slot != 'place'
         d['name'] ?? '',
         fieldText(d, 'address'),
       ].where((s) => s.toString().trim().isNotEmpty).join(' · ').trim();
-Map<String, dynamic>? linkedPlace(Map<String, dynamic> d, String slot) {
+Map<String, dynamic>? locationBinding(Map<String, dynamic> d, String slot) {
   final p = (d['locations'] as Map?)?[slot];
   return p == null ? null : Map<String, dynamic>.from(p);
 }
 
+Map<String, dynamic>? linkedPlace(Map<String, dynamic> d, String slot) {
+  final p = locationBinding(d, slot);
+  return p == null || p.containsKey('url') ? null : p;
+}
+
 bool placeStale(Map<String, dynamic> d, String slot) =>
-    linkedPlace(d, slot) != null &&
-    linkedPlace(d, slot)!['sourceText'] != placeText(d, slot);
+    locationBinding(d, slot) != null &&
+    locationBinding(d, slot)!['sourceText'] != placeText(d, slot);
 
 bool hasPlace(Map<String, dynamic> d, String slot) =>
     placeText(d, slot).isNotEmpty ||
-    (!placeStale(d, slot) && linkedPlace(d, slot) != null);
+    (!placeStale(d, slot) && locationBinding(d, slot) != null);
 
 String navigationSlot(PlanNode node) {
   final d = node.item.data;
@@ -89,6 +94,7 @@ class PlaceSearch {
   final Store store;
   PlaceSearch(this.store);
   Future<List<Map<String, dynamic>>> search(String query) async {
+    if (Platform.isAndroid) throw const FormatException('手机端请使用外部地图搜索');
     query = query.trim();
     if (query.isEmpty || query.length > 300) {
       throw const FormatException('请填写地点名称和城市，最多 300 字');
@@ -190,6 +196,7 @@ Uri navigationUri(
   bool route = false,
   bool web = false,
 }) {
+  if (route) slot = 'destination';
   final p = placeStale(d, slot) ? null : linkedPlace(d, slot);
   final from = placeStale(d, 'origin') ? null : linkedPlace(d, 'origin');
   final text = placeText(d, slot);

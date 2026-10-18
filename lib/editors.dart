@@ -1,3 +1,4 @@
+import 'external_binding.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'planner.dart';
@@ -247,6 +248,7 @@ class ItemEditor extends StatefulWidget {
   final Record? item;
   final int day;
   final VoidCallback onClose;
+  final String? bindingSlot;
   const ItemEditor({
     super.key,
     required this.store,
@@ -254,12 +256,37 @@ class ItemEditor extends StatefulWidget {
     required this.day,
     required this.onClose,
     this.item,
+    this.bindingSlot,
   });
   @override
   State<ItemEditor> createState() => ItemEditorState();
 }
 
 class ItemEditorState extends State<ItemEditor> {
+  Future<void> bindExternal(String slot) async {
+    final d = value();
+    final picked = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => ExternalBindingPage(
+          store: widget.store,
+          tripId: widget.trip.id,
+          itemId: widget.item?.id,
+          target:
+              '${widget.trip.data['name']} / ${d['name'] == '' ? d['type'] : d['name']}',
+          slot: slot,
+          sourceText: placeText(d, slot),
+          original: locationBinding(d, slot),
+        ),
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(
+        () =>
+            draft['locations'] = {...?draft['locations'] as Map?, slot: picked},
+      );
+    }
+  }
+
   final pickerKey = GlobalKey<PickerRegionState>();
   int? openedModified;
   late String initialValue;
@@ -271,6 +298,11 @@ class ItemEditorState extends State<ItemEditor> {
   @override
   void initState() {
     super.initState();
+    if (widget.bindingSlot != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) bindExternal(widget.bindingSlot!);
+      });
+    }
     openedModified = widget.item?.modified;
     draft = widget.item == null
         ? {
@@ -747,7 +779,7 @@ class ItemEditorState extends State<ItemEditor> {
                           field('destination'),
                         ]),
                         builder: (context, _) {
-                          final d = value(), p = linkedPlace(value(), slot);
+                          final d = value(), p = locationBinding(value(), slot);
                           return Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: Column(
@@ -763,7 +795,7 @@ class ItemEditorState extends State<ItemEditor> {
                                 Text(
                                   p == null
                                       ? '尚未关联地点'
-                                      : '${p['name']} · ${p['address']}',
+                                      : '${Theme.of(context).platform == TargetPlatform.android ? '${p['provider']} · ' : ''}${p['name']} · ${p['address']}',
                                 ),
                                 if (placeStale(d, slot))
                                   Text(
@@ -779,11 +811,16 @@ class ItemEditorState extends State<ItemEditor> {
                                   children: [
                                     FilledButton.tonal(
                                       onPressed: () async {
+                                        if (Theme.of(context).platform ==
+                                            TargetPlatform.android) {
+                                          await bindExternal(slot);
+                                          return;
+                                        }
                                         final picked = await choosePlace(
                                           context,
                                           widget.store,
                                           placeText(d, slot),
-                                          p,
+                                          linkedPlace(d, slot),
                                         );
                                         if (picked != null && mounted) {
                                           setState(() {
@@ -797,10 +834,28 @@ class ItemEditorState extends State<ItemEditor> {
                                       child: Text(
                                         p == null
                                             ? (slot == 'origin'
-                                                  ? '设置起点'
+                                                  ? (Theme.of(
+                                                              context,
+                                                            ).platform ==
+                                                            TargetPlatform
+                                                                .android
+                                                        ? '绑定起点'
+                                                        : '设置起点')
                                                   : slot == 'destination'
-                                                  ? '设置终点'
-                                                  : '设置地点')
+                                                  ? (Theme.of(
+                                                              context,
+                                                            ).platform ==
+                                                            TargetPlatform
+                                                                .android
+                                                        ? '绑定终点'
+                                                        : '设置终点')
+                                                  : (Theme.of(
+                                                              context,
+                                                            ).platform ==
+                                                            TargetPlatform
+                                                                .android
+                                                        ? '绑定地点'
+                                                        : '设置地点'))
                                             : '更换 / 核对',
                                       ),
                                     ),

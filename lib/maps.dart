@@ -413,11 +413,14 @@ Future<Map<String, dynamic>?> choosePlace(
   Store store,
   String text,
   Map<String, dynamic>? current,
-) => Navigator.of(context).push<Map<String, dynamic>>(
-  MaterialPageRoute(
-    builder: (_) => _PlacePicker(store: store, text: text, current: current),
-  ),
-);
+) => Theme.of(context).platform == TargetPlatform.android
+    ? Future.value(null)
+    : Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute(
+          builder: (_) =>
+              _PlacePicker(store: store, text: text, current: current),
+        ),
+      );
 
 class _PlacePicker extends StatefulWidget {
   final Store store;
@@ -650,6 +653,47 @@ Future<void> navigatePlace(
   bool options = false,
 }) async {
   final target = slot ?? (isTransport(d['type']) ? 'destination' : 'place');
+  final binding = locationBinding(d, target);
+  if (binding?['url'] is String && !placeStale(d, target)) {
+    final url = Uri.parse(binding!['url']);
+    if (!options && await openMapUrl(url)) return;
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('外部地图链接已绑定'),
+        content: SelectableText(
+          '${binding['name']}\n${binding['url']}\n尚无新地点的可靠坐标。打开后请在外部地图中选择导航。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final ok = await openMapUrl(url);
+              if (c.mounted) {
+                ScaffoldMessenger.of(c).showSnackBar(
+                  SnackBar(
+                    content: Text(ok ? '已请求打开原链接' : '原链接打开失败，请复制后在浏览器或地图中打开'),
+                  ),
+                );
+              }
+            },
+            child: const Text('打开原链接'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: binding['url']));
+            },
+            child: const Text('复制链接'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+    return;
+  }
   final p = placeStale(d, target) ? null : linkedPlace(d, target);
   var region = p?['country'] == 'cn'
       ? 'domestic'
@@ -760,7 +804,17 @@ Future<void> navigatePlace(
                     if (isTransport(d['type']) &&
                         placeText(d, 'origin').isNotEmpty)
                       TextButton(
-                        onPressed: () => launch(route: true),
+                        onPressed: () {
+                          if (linkedPlace(d, 'origin') == null ||
+                              linkedPlace(d, 'destination') == null) {
+                            ScaffoldMessenger.of(c).showSnackBar(
+                              const SnackBar(
+                                content: Text('将按文字请求路线，请核对起终点；分享链接不会拼接为路线。'),
+                              ),
+                            );
+                          }
+                          launch(route: true);
+                        },
                         child: const Text('查看起终点路线'),
                       ),
                     TextButton(
@@ -818,7 +872,16 @@ class NavigationActions extends StatelessWidget {
             : navigationSlot(node!));
     final valid =
         linkedPlace(data, target) != null && !placeStale(data, target);
-    final label = !valid
+    final hasLink =
+        locationBinding(data, target)?['url'] is String &&
+        !placeStale(data, target);
+    final label = hasLink
+        ? (target == 'origin'
+              ? '打开地图地点 · 出发地'
+              : node?.end == true
+              ? '打开地图地点 · 到达地'
+              : '打开地图地点')
+        : !valid
         ? (target == 'origin'
               ? '搜索地点 · 出发地'
               : node?.end == true

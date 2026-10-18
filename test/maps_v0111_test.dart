@@ -23,7 +23,7 @@ void main() {
     );
   });
   testWidgets(
-    'Android binds both ends without PC; explicit candidate/manual draft, save, sync and direct navigation',
+    'Windows retains both-end binding; explicit candidate/manual draft, save, sync and direct navigation',
     (t) async {
       t.view.physicalSize = const Size(390, 844);
       t.view.devicePixelRatio = 1;
@@ -45,7 +45,7 @@ void main() {
       final key = GlobalKey<ItemEditorState>();
       await t.pumpWidget(
         MaterialApp(
-          theme: ThemeData(platform: TargetPlatform.android),
+          theme: ThemeData(platform: TargetPlatform.windows),
           home: Scaffold(
             body: ItemEditor(
               key: key,
@@ -172,7 +172,7 @@ void main() {
       final key = GlobalKey<ItemEditorState>();
       await t.pumpWidget(
         MaterialApp(
-          theme: ThemeData(platform: TargetPlatform.android),
+          theme: ThemeData(platform: TargetPlatform.windows),
           home: Scaffold(
             body: ItemEditor(
               key: key,
