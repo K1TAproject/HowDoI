@@ -227,7 +227,7 @@ void main() {
       s.dispose();
     },
   );
-  testWidgets('Android editor keeps draft and unlink but has no map picker', (
+  testWidgets('Android editor keeps draft and unlink without inline map', (
     t,
   ) async {
     final s = Store(':memory:');
@@ -254,9 +254,8 @@ void main() {
     );
     await t.pumpAndSettle();
     await t.ensureVisible(find.text('地图地点（可选）'));
-    await t.tap(find.text('地图地点（可选）'));
     await t.pumpAndSettle();
-    expect(find.text('更换 / 核对'), findsNothing);
+    expect(find.text('更换 / 核对'), findsOneWidget);
     expect(find.byType(PlaceMap), findsNothing);
     await t.ensureVisible(find.text('解除关联'));
     await t.tap(find.text('解除关联'));

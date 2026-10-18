@@ -63,9 +63,12 @@ void main() {
       final store = Store('work/map-network-test.db');
       try {
         for (final query in [
-          'Beijing Capital International Airport',
+          'Haneda Airport Tokyo Japan',
           'Tokyo Station Japan',
-          'Eiffel Tower Paris',
+          'Hilton Tokyo Japan',
+          'Frankfurt Airport Germany',
+          'Gare du Nord Paris France',
+          'Hilton Berlin Germany',
         ]) {
           final watch = Stopwatch()..start();
           try {

@@ -734,12 +734,10 @@ class ItemEditorState extends State<ItemEditor> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                ExpansionTile(
-                  key: const PageStorageKey('editor-map-locations'),
-                  title: const Text('地图地点（可选）'),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (Theme.of(context).platform == TargetPlatform.android)
-                      const Text('地点搜索和地图选点请在 Windows 完成后同步。'),
+                    const Text('地图地点（可选）'),
                     for (final slot in placeSlots(value()))
                       AnimatedBuilder(
                         animation: Listenable.merge([
@@ -779,29 +777,33 @@ class ItemEditorState extends State<ItemEditor> {
                                 Wrap(
                                   spacing: 8,
                                   children: [
-                                    if (Theme.of(context).platform ==
-                                        TargetPlatform.windows)
-                                      TextButton(
-                                        onPressed: () async {
-                                          final picked = await choosePlace(
-                                            context,
-                                            widget.store,
-                                            placeText(d, slot),
-                                            p,
-                                          );
-                                          if (picked != null && mounted) {
-                                            setState(() {
-                                              draft['locations'] = {
-                                                ...?draft['locations'] as Map?,
-                                                slot: picked,
-                                              };
-                                            });
-                                          }
-                                        },
-                                        child: Text(
-                                          p == null ? '关联地点' : '更换 / 核对',
-                                        ),
+                                    FilledButton.tonal(
+                                      onPressed: () async {
+                                        final picked = await choosePlace(
+                                          context,
+                                          widget.store,
+                                          placeText(d, slot),
+                                          p,
+                                        );
+                                        if (picked != null && mounted) {
+                                          setState(() {
+                                            draft['locations'] = {
+                                              ...?draft['locations'] as Map?,
+                                              slot: picked,
+                                            };
+                                          });
+                                        }
+                                      },
+                                      child: Text(
+                                        p == null
+                                            ? (slot == 'origin'
+                                                  ? '设置起点'
+                                                  : slot == 'destination'
+                                                  ? '设置终点'
+                                                  : '设置地点')
+                                            : '更换 / 核对',
                                       ),
+                                    ),
                                     if (p != null)
                                       TextButton(
                                         onPressed: () => setState(() {
@@ -820,7 +822,7 @@ class ItemEditorState extends State<ItemEditor> {
                                       slot: slot,
                                     ),
                                     if (!hasPlace(d, slot))
-                                      const Text('请先填写地点'),
+                                      const Text('可填写地点文字或点击设置地点'),
                                   ],
                                 ),
                               ],

@@ -448,6 +448,7 @@ class _PlacePickerState extends State<_PlacePicker> {
   }
 
   Future<void> search() async {
+    FocusScope.of(context).unfocus();
     setState(() {
       busy = true;
       error = null;
@@ -462,8 +463,16 @@ class _PlacePickerState extends State<_PlacePicker> {
           searched = true;
         });
       }
+    } on FormatException catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } on TimeoutException {
+      if (mounted) setState(() => error = '搜索请求超时，请检查网络后重试；输入和原地点已保留。');
+    } on SocketException {
+      if (mounted) {
+        setState(() => error = '无法连接搜索服务，请检查网络或代理后重试。与是否安装 Google Maps 无关。');
+      }
     } catch (_) {
-      if (mounted) setState(() => error = '搜索失败或服务限流。请稍后重试，也可移动地图后点击选点。');
+      if (mounted) setState(() => error = '搜索响应或连接异常，请稍后重试；输入和原地点已保留。');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -471,117 +480,164 @@ class _PlacePickerState extends State<_PlacePicker> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('关联地点')),
-    body: ListView(
-      padding: const EdgeInsets.all(16),
+    appBar: AppBar(title: const Text('选择地点')),
+    body: Column(
       children: [
-        const Text('仅地点关键词会发送到搜索服务。不要输入私人住址或机密信息。请选择正确候选，或在地图上点击选点。'),
-        TextField(
-          controller: query,
-          decoration: const InputDecoration(labelText: '地点名称'),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text('仅地点关键词会发送到搜索服务。不要输入私人住址或机密信息。请选择正确候选，或在地图上点击选点。'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: query,
+                decoration: const InputDecoration(labelText: '地点名称'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: region,
+                decoration: const InputDecoration(labelText: '城市 / 地区（可选）'),
+              ),
+              const SizedBox(height: 8),
+              FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size(88, 48)),
+                onPressed: busy ? null : search,
+                child: Text(
+                  busy
+                      ? '搜索中…'
+                      : error != null
+                      ? '重试搜索'
+                      : '搜索',
+                ),
+              ),
+              const Text(
+                '个人双端使用：公共搜索两端合计最多每秒 1 次。请勿同时在电脑和手机搜索；本机请求间隔至少 3 秒并缓存。',
+              ),
+              TextButton(
+                onPressed: () => openMapUrl(
+                  Uri.parse(
+                    'https://operations.osmfoundation.org/policies/nominatim/',
+                  ),
+                ),
+                child: const Text('Nominatim 使用政策：点击搜索、限流、缓存，无自动补全'),
+              ),
+              if (error != null)
+                Text(
+                  error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              if (searched && results.isEmpty)
+                const Text('未找到候选。请补充城市或在地图上选点。'),
+              if (results.isNotEmpty) const Text('请选择候选，尚未自动绑定任何搜索结果'),
+              if (results.isNotEmpty)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final p in results)
+                        ListTile(
+                          selected: identical(selected, p),
+                          title: Text(p['name']),
+                          subtitle: Text(p['address']),
+                          trailing: identical(selected, p)
+                              ? const Icon(Icons.check)
+                              : null,
+                          onTap: () {
+                            FocusScope.of(context).unfocus();
+                            setState(() => selected = p);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 12),
+              const Text('地图底图文字不是可点击地点。移动、缩放后点击地图，将标记放到你确认的位置。'),
+              SizedBox(
+                height: 340,
+                child: PlaceMap(
+                  points: selected == null ? [] : [selected!],
+                  onPick: (point) => setState(() {
+                    selected = {
+                      'name': query.text.trim().isEmpty
+                          ? '手动选点'
+                          : query.text.trim(),
+                      'address': region.text.trim(),
+                      'lat': point.latitude,
+                      'lon': point.longitude,
+                      'provider': 'manual',
+                      'crs': 'WGS84',
+                      'id': '',
+                      'sourceText': '',
+                      'country': '',
+                    };
+                  }),
+                ),
+              ),
+              if (selected != null)
+                Text(
+                  '待确认标记：${selected!['name']} · ${selected!['address']}（${selected!['provider'] == 'manual' ? '手动选点，未识别底图地点身份' : '搜索候选'}）',
+                ),
+              ExpansionTile(
+                title: const Text('搜索服务设置'),
+                children: [
+                  const Text(
+                    '只更换兼容 Nominatim 的 HTTPS 搜索端点。不会随旅行同步或备份；使用前自行确认服务条款，不填写密钥。',
+                  ),
+                  TextField(
+                    controller: endpoint,
+                    decoration: const InputDecoration(labelText: '搜索端点'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      final uri = Uri.tryParse(endpoint.text.trim());
+                      if (uri == null ||
+                          uri.scheme != 'https' ||
+                          uri.host.isEmpty ||
+                          uri.userInfo.isNotEmpty ||
+                          uri.hasQuery ||
+                          uri.hasFragment) {
+                        setState(() => error = '请填写不含凭据、查询参数或片段的 HTTPS 地址');
+                        return;
+                      }
+                      widget.store.setSetting(
+                        'mapSearchEndpoint',
+                        uri.toString(),
+                      );
+                      setState(() => error = null);
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(const SnackBar(content: Text('搜索端点已保存')));
+                    },
+                    child: const Text('保存端点'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        TextField(
-          controller: region,
-          decoration: const InputDecoration(labelText: '城市 / 地区（可选）'),
-        ),
-        if (Platform.isWindows)
-          FilledButton(
-            onPressed: busy ? null : search,
-            child: Text(busy ? '搜索中…' : '搜索'),
-          )
-        else
-          const Text('地点搜索请在电脑端完成后同步；手机可手动选点或使用外部地图搜索。'),
-        TextButton(
-          onPressed: () => openMapUrl(
-            Uri.parse(
-              'https://operations.osmfoundation.org/policies/nominatim/',
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('仅写入草稿；还需保存行程才能同步。', textAlign: TextAlign.center),
+                FilledButton(
+                  onPressed: selected == null || busy
+                      ? null
+                      : () => Navigator.pop(context, {
+                          ...selected!,
+                          'sourceText': widget.text,
+                        }),
+                  child: const Text('确认地点'),
+                ),
+              ],
             ),
           ),
-          child: const Text('Nominatim 使用政策：点击搜索、限流、缓存，无自动补全'),
-        ),
-        if (error != null)
-          Text(
-            error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        if (searched && results.isEmpty) const Text('未找到候选。请补充城市或在地图上选点。'),
-        for (final p in results)
-          ListTile(
-            selected: identical(selected, p),
-            title: Text(p['name']),
-            subtitle: Text(p['address']),
-            trailing: identical(selected, p) ? const Icon(Icons.check) : null,
-            onTap: () => setState(() => selected = p),
-          ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 340,
-          child: PlaceMap(
-            points: selected == null ? [] : [selected!],
-            onPick: (point) => setState(() {
-              selected = {
-                'name': query.text.trim().isEmpty ? '手动选点' : query.text.trim(),
-                'address': region.text.trim(),
-                'lat': point.latitude,
-                'lon': point.longitude,
-                'provider': 'manual',
-                'crs': 'WGS84',
-                'id': '',
-                'sourceText': '',
-                'country': '',
-              };
-            }),
-          ),
-        ),
-        if (selected != null)
-          Text('待确认：${selected!['name']} · ${selected!['address']}'),
-        ExpansionTile(
-          title: const Text('搜索服务设置'),
-          children: [
-            const Text(
-              '只更换兼容 Nominatim 的 HTTPS 搜索端点。不会随旅行同步或备份；使用前自行确认服务条款，不填写密钥。',
-            ),
-            TextField(
-              controller: endpoint,
-              decoration: const InputDecoration(labelText: '搜索端点'),
-            ),
-            TextButton(
-              onPressed: () {
-                final uri = Uri.tryParse(endpoint.text.trim());
-                if (uri == null ||
-                    uri.scheme != 'https' ||
-                    uri.host.isEmpty ||
-                    uri.userInfo.isNotEmpty ||
-                    uri.hasQuery ||
-                    uri.hasFragment) {
-                  setState(() => error = '请填写不含凭据、查询参数或片段的 HTTPS 地址');
-                  return;
-                }
-                widget.store.setSetting('mapSearchEndpoint', uri.toString());
-                setState(() => error = null);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('搜索端点已保存')));
-              },
-              child: const Text('保存端点'),
-            ),
-          ],
         ),
       ],
-    ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: FilledButton(
-          onPressed: selected == null
-              ? null
-              : () => Navigator.pop(context, {
-                  ...selected!,
-                  'sourceText': widget.text,
-                }),
-          child: const Text('确认地点并写入草稿'),
-        ),
-      ),
     ),
   );
 }

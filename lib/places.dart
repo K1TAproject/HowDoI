@@ -116,8 +116,8 @@ class PlaceSearch {
       ..connectionTimeout = const Duration(seconds: 10);
     try {
       final gap = DateTime.now().difference(_last);
-      if (gap < const Duration(milliseconds: 1100)) {
-        await Future<void>.delayed(const Duration(milliseconds: 1100) - gap);
+      if (gap < const Duration(milliseconds: 3000)) {
+        await Future<void>.delayed(const Duration(milliseconds: 3000) - gap);
       }
       _last = DateTime.now();
       final req = await client
