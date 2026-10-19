@@ -220,12 +220,21 @@ void main() {
         ),
       );
       await t.pumpAndSettle();
-      expect(key.currentState!.value()['locations'], r.data['locations']);
+      final slot = placeSlots(key.currentState!.value()).single;
+      expect(
+        locationBinding(key.currentState!.value(), slot),
+        r.data['locations']['place'],
+      );
       key.currentState!.name.text = '京都';
-      expect(placeStale(key.currentState!.value(), 'place'), true);
+      expect(placeStale(key.currentState!.value(), slot), false);
+      key.currentState!.draft['activityPlaces'][0]['name'] = '京都';
+      expect(placeStale(key.currentState!.value(), slot), true);
       expect(s.get(r.id)!.data['name'], '东京');
       expect(key.currentState!.save(close: false), true);
-      expect(s.get(r.id)!.data['locations'], r.data['locations']);
+      expect(
+        locationBinding(s.get(r.id)!.data, slot),
+        r.data['locations']['place'],
+      );
       await t.pumpWidget(const SizedBox());
       s.dispose();
     },
@@ -244,7 +253,7 @@ void main() {
           body: Builder(
             builder: (c) => ListView(
               children: [
-                LocationCards(nodes: const [], onItem: (_) {}),
+                UnboundPlaces(nodes: const [], onItem: (_) {}),
                 TextButton(
                   onPressed: () => navigatePlace(c, s, itemData('t', '东京')),
                   child: const Text('打开导航'),

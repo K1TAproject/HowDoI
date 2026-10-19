@@ -146,7 +146,37 @@ class Record {
 }
 
 void validateData(String kind, Map<String, dynamic> d) {
-  if (kind == 'item') validateLocations(d['locations']);
+  if (kind == 'item') {
+    validateLocations(d['locations']);
+    if (d['noReuse'] != null &&
+        (d['noReuse'] is! Map ||
+            (d['noReuse'] as Map).entries.any(
+              (e) =>
+                  !['place', 'origin', 'destination'].contains(e.key) ||
+                  e.value is! bool,
+            ))) {
+      throw const FormatException('地点复用标记无效');
+    }
+    final points = d['activityPlaces'];
+    if (points != null) {
+      if (points is! List || points.length > 100) {
+        throw const FormatException('活动地点列表无效（最多100个）');
+      }
+      final ids = <String>{};
+      for (final p in points) {
+        if (p is! Map ||
+            p['id'] is! String ||
+            p['id'].isEmpty ||
+            !ids.add(p['id']) ||
+            p['name'] is! String ||
+            p['name'].length > 2000 ||
+            p['reuseBlocked'] != null && p['reuseBlocked'] is! bool) {
+          throw const FormatException('活动地点格式无效');
+        }
+        if (p['binding'] != null) validateLocations({'place': p['binding']});
+      }
+    }
+  }
   if (utf8.encode(jsonEncode(d)).length > 100000) {
     throw const FormatException('单条记录过大');
   }
@@ -285,8 +315,8 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
   if (m is! Map ||
       m['format'] != format ||
       (format == 'howdoi-sync'
-          ? m['version'] != 5
-          : ![1, 2, 3, 4, 5].contains(m['version'])) ||
+          ? m['version'] != 6
+          : ![1, 2, 3, 4, 5, 6].contains(m['version'])) ||
       m['records'] is! List ||
       m['records'].length > 20000) {
     throw const FormatException('不是受支持的 HowDoI 数据文件');

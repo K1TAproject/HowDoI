@@ -60,7 +60,7 @@ void main() {
         final copy = Store(':memory:');
         copy.importCopy(
           decodeRecords(
-            store.export().replaceFirst('"version":5', '"version":$version'),
+            store.export().replaceFirst('"version":6', '"version":$version'),
           ),
         );
         expect(
@@ -195,18 +195,21 @@ void main() {
       await t.tap(find.text('旧费用'));
       await t.pumpAndSettle();
       final editor = t.state<ItemEditorState>(find.byType(ItemEditor));
-      final future = editor.cost();
+      expect(editor.blankCost()['currency'], 'JPY');
+      expect(editor.value()['costs'][0]['currency'], 'EUR');
+      await t.scrollUntilVisible(
+        find.text('预计预算'),
+        250,
+        scrollable: find
+            .descendant(
+              of: find.byType(ItemEditor),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await t.tap(find.text('预计预算'));
       await t.pumpAndSettle();
-      expect(find.text('JPY'), findsOneWidget);
-      await t.tap(find.text('取消'));
-      await t.pumpAndSettle();
-      await future;
-      final edit = editor.cost(0);
-      await t.pumpAndSettle();
-      expect(find.text('EUR'), findsOneWidget);
-      await t.tap(find.text('取消'));
-      await t.pumpAndSettle();
-      await edit;
+      expect(find.text('费用名称'), findsNothing);
       expect(t.takeException(), isNull);
       await t.pumpWidget(const SizedBox());
       sync.dispose();

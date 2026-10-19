@@ -7,7 +7,9 @@ import 'places.dart';
 import 'share_inbox.dart';
 import 'store.dart';
 
-String placeSlotLabel(String slot) => slot == 'origin'
+String placeSlotLabel(String slot) => slot.startsWith('activity:')
+    ? '活动地点'
+    : slot == 'origin'
     ? '起点'
     : slot == 'destination'
     ? '终点'
@@ -138,7 +140,9 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text('确认目标：${widget.target} · ${placeSlotLabel(widget.slot)}'),
+                Text(
+                  '确认目标：${widget.target} · ${placeSlotLabel(widget.slot)} · ${widget.sourceText}',
+                ),
                 const Text('确认绑定只写入草稿；返回行程后仍需点击“保存行程”。'),
                 TextField(
                   controller: query,

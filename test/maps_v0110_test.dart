@@ -49,7 +49,7 @@ void main() {
     );
   });
   testWidgets(
-    'platform entrypoints: Windows inline day map; Android cards and overview no maps',
+    'platform entrypoints: both platforms use inline place links without maps',
     (t) async {
       final s = Store(':memory:');
       final sync = SyncService(s, host: false);
@@ -64,14 +64,8 @@ void main() {
         );
         await t.pumpAndSettle();
         expect(find.text('查看当天地图'), findsNothing);
-        expect(
-          find.text('当天地点'),
-          platform == TargetPlatform.windows ? findsOneWidget : findsNothing,
-        );
-        expect(
-          find.byType(NavigationActions),
-          platform == TargetPlatform.android ? findsOneWidget : findsNothing,
-        );
+        expect(find.text('当天地点'), findsNothing);
+        expect(find.byType(PlaceLinks), findsOneWidget);
         await t.pumpWidget(const SizedBox());
       }
       await t.pumpWidget(
@@ -90,7 +84,7 @@ void main() {
       await t.pumpAndSettle();
       expect(find.text('查看旅行地图'), findsNothing);
       expect(find.text('选择地点'), findsNothing);
-      expect(find.byType(NavigationActions), findsOneWidget);
+      expect(find.byType(PlaceLinks), findsOneWidget);
       await t.pumpWidget(const SizedBox());
       sync.dispose();
       s.dispose();
@@ -102,7 +96,7 @@ void main() {
       final s = Store(':memory:');
       final trip = s.save('trip', tripData());
       final r = s.save('item', {
-        ...itemData(trip.id, '东京'),
+        ...itemData(trip.id, '东京', type: '餐饮'),
         'locations': {'place': place('东京')},
       });
       final urls = <Uri>[];
@@ -168,7 +162,7 @@ void main() {
     final s = Store(':memory:');
     final trip = s.save('trip', tripData());
     final r = s.save('item', {
-      ...itemData(trip.id, '东京'),
+      ...itemData(trip.id, '东京', type: '餐饮'),
       'locations': {'place': place('东京')},
     });
     final key = GlobalKey<ItemEditorState>();
@@ -190,10 +184,10 @@ void main() {
     await t.pumpAndSettle();
     await t.ensureVisible(find.text('地图地点（可选）'));
     await t.pumpAndSettle();
-    expect(find.text('更换 / 核对'), findsOneWidget);
+    expect(find.text('更换绑定'), findsOneWidget);
     expect(find.text('选择地点'), findsNothing);
-    await t.ensureVisible(find.text('解除关联'));
-    await t.tap(find.text('解除关联'));
+    await t.ensureVisible(find.text('解除绑定'));
+    await t.tap(find.text('解除绑定'));
     await t.pumpAndSettle();
     expect(key.currentState!.value()['locations'], isEmpty);
     expect(s.get(r.id)!.data['locations'], isNotEmpty);

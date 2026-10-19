@@ -57,7 +57,7 @@ void main() {
       addTearDown(b.dispose);
       final trip = a.save('trip', tripData());
       final r = a.save('item', {
-        ...itemData(trip.id, '酒店'),
+        ...itemData(trip.id, '酒店', type: '餐饮'),
         'locations': {'place': binding(amap)},
       });
       b.merge(decodeRecords(a.export(sync: true), format: 'howdoi-sync'));
@@ -100,7 +100,7 @@ void main() {
         addTearDown(t.view.resetDevicePixelRatio);
         final s = Store(':memory:');
         final trip = s.save('trip', tripData());
-        final r = s.save('item', itemData(trip.id, '酒店'));
+        final r = s.save('item', itemData(trip.id, '酒店', type: '餐饮'));
         s.setSetting('mapProvider:domestic', 'baidu');
         final key = GlobalKey<ItemEditorState>();
         final urls = <String>[];
@@ -166,23 +166,23 @@ void main() {
             theme: ThemeData(platform: TargetPlatform.windows),
             home: Scaffold(
               body: SingleChildScrollView(
-                child: LocationCards(
-                  nodes: s.timeline(trip.id, 1),
-                  daily: true,
-                  onItem: (_) {},
+                child: PlaceLinks(
+                  store: s,
+                  node: s.timeline(trip.id, 1).single,
+                  onEdit: () {},
                 ),
               ),
             ),
           ),
         );
         await t.pumpAndSettle();
-        expect(find.text('高德地图'), findsOneWidget);
-        await t.tap(find.text('打开地图网页'));
+        expect(find.text('高德地图'), findsNothing);
+        await t.tap(find.text('酒店'));
         await t.pumpAndSettle();
         expect(urls.last, amap);
         expect(s.export(), before);
         ok = false;
-        await t.tap(find.text('打开地图网页'));
+        await t.tap(find.text('酒店'));
         await t.pumpAndSettle();
         expect(find.text('复制链接'), findsOneWidget);
         await t.tap(find.text('重试'));

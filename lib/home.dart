@@ -281,7 +281,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                         ))
                           DropdownMenuItem(
                             value: slot,
-                            child: Text(placeSlotLabel(slot)),
+                            child: Text(
+                              '${placeSlotLabel(slot)} · ${placeText(store.get(selectedItem!)!.data, slot)}',
+                            ),
                           ),
                       ],
                       onChanged: (v) => set(() => selectedSlot = v),
@@ -925,13 +927,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                     ),
                                   ),
                                 ),
-                              if (Theme.of(context).platform ==
-                                  TargetPlatform.android)
-                                NavigationActions(
-                                  store: store,
-                                  data: d,
-                                  node: node,
-                                ),
+                              PlaceLinks(
+                                store: store,
+                                node: node,
+                                onEdit: () => openEditor(trip, r, wide),
+                              ),
                               if ((d['note'] as String).isNotEmpty)
                                 InkWell(
                                   onTap: () => setState(() {
@@ -1033,20 +1033,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             header: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (day != 0 &&
-                    Theme.of(context).platform == TargetPlatform.windows)
-                  ExpansionTile(
-                    key: PageStorageKey('daily-map:${trip.id}:$day'),
-                    initiallyExpanded: true,
-                    title: const Text('当天地点'),
-                    children: [
-                      LocationCards(
-                        nodes: [...rows, ...stays],
-                        daily: true,
-                        onItem: (r) => openEditor(trip, r, wide),
-                      ),
-                    ],
-                  ),
+                UnboundPlaces(
+                  nodes: [...rows, ...stays],
+                  onItem: (r) => openEditor(trip, r, wide),
+                ),
                 if (rows.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(24),

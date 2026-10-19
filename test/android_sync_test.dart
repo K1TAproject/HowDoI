@@ -173,6 +173,23 @@ void main() {
           },
         ],
       });
+      final activity = a.save('item', {
+        ...itemData(trip.id, '札幌观光', type: '游览/活动'),
+        'activityPlaces': [
+          {
+            'id': 'p1',
+            'name': '公园',
+            'binding': {
+              'name': '公园',
+              'address': '',
+              'sourceText': '公园',
+              'provider': 'google',
+              'url': 'https://maps.app.goo.gl/ytAHMqwsXXqTCoky5',
+            },
+          },
+          {'id': 'p2', 'name': '神宫'},
+        ],
+      });
       final flight = a.save('item', {
         ...itemData(trip.id, '跨日航班', type: '航班'),
         'endDay': 2,
@@ -232,6 +249,10 @@ void main() {
           http.close(force: true);
         }
       }
+      expect(
+        b.get(activity.id)!.data['activityPlaces'],
+        activity.data['activityPlaces'],
+      );
       expect(b.visibleDays(trip.id), a.visibleDays(trip.id));
       expect(b.preparations(b.get(trip.id)!), a.preparations(trip));
       expect(
@@ -255,8 +276,18 @@ void main() {
           },
         },
       }, id: flight.id);
+      b.save('item', {
+        ...b.get(activity.id)!.data,
+        'activityPlaces': [
+          ...(b.get(activity.id)!.data['activityPlaces'] as List).reversed,
+        ],
+      }, id: activity.id);
       client.active = true;
       await client.tick();
+      expect(
+        a.get(activity.id)!.data['activityPlaces'],
+        b.get(activity.id)!.data['activityPlaces'],
+      );
       expect(a.get(flight.id)!.data['note'], '手机离线');
       expect(
         a.get(flight.id)!.data['locations'],
@@ -283,7 +314,7 @@ void main() {
       expect(a.get(trip.id)!.data, expected.data);
       expect(b.get(trip.id)!.data, expected.data);
       await Future.wait([client.tick(), client.tick(), client.tick()]);
-      expect(a.items(trip.id).length, 2);
+      expect(a.items(trip.id).length, 3);
       a.remove(a.get(flight.id)!);
       await client.tick();
       expect(b.get(flight.id)!.deleted, true);
@@ -296,7 +327,10 @@ void main() {
       expect(client.status, startsWith('已同步'));
       expect(b.get(hotel.id)!.data['locations'], hotel.data['locations']);
       expect(client.lastSuccess, isNotNull);
-      expect(b.items(trip.id).single.id, hotel.id);
+      expect(
+        b.items(trip.id).map((r) => r.id),
+        containsAll([hotel.id, activity.id]),
+      );
       // Saved modifications trigger a real bidirectional sync automatically.
       b.save('item', {...b.get(hotel.id)!.data, 'note': '自动同步'}, id: hotel.id);
       for (var n = 0; n < 40 && a.get(hotel.id)!.data['note'] != '自动同步'; n++) {

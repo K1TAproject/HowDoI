@@ -75,7 +75,7 @@ void main() {
         ],
         ['A', 'B', '酒店', 'B', 'A', 'A'],
       );
-      expect(data.placeNames, {'A', 'B', '酒店'});
+      expect(data.placeNames, {'A', 'B', '酒店', '历史'});
       final stayOnly = Store(':memory:');
       addTearDown(stayOnly.dispose);
       final stayTrip = stayOnly.save('trip', tripData());
@@ -205,11 +205,6 @@ void main() {
       await t.pumpAndSettle();
       await t.drag(find.byType(ListView).first, const Offset(0, -900));
       await t.pumpAndSettle();
-      await t.scrollUntilVisible(find.textContaining('地点清单 ·'), 300);
-      await t.pumpAndSettle();
-      expect(t.takeException(), isNull);
-      await t.tap(find.textContaining('地点清单 ·'));
-      await t.pumpAndSettle();
       await t.scrollUntilVisible(find.text('EUR 25.00'), 300);
       await t.pumpAndSettle();
       expect(t.takeException(), isNull);
@@ -261,7 +256,7 @@ void main() {
         expect(find.text('门票/活动 · EUR 30.00 · 75.0%'), findsOneWidget);
         await t.tap(find.text('门票/活动 · EUR 30.00 · 75.0%'));
         await t.pumpAndSettle();
-        await t.tap(find.text('未命名费用 · EUR 30.00'));
+        await t.tap(find.text('博物馆 · EUR 30.00'));
         await t.pumpAndSettle();
         expect(find.byType(ItemEditor), findsOneWidget);
         final fields = find.descendant(

@@ -305,12 +305,50 @@ class Store extends ChangeNotifier {
     'INSERT OR REPLACE INTO records VALUES (?,?)',
     [r.id, jsonEncode(r.toJson())],
   );
+  List<String> frequentTypes() {
+    final counts = <String, int>{};
+    for (final r in all.where(
+      (r) =>
+          r.kind == 'item' &&
+          !r.deleted &&
+          get(r.data['trip'])?.deleted == false,
+    )) {
+      final type = r.data['type'] as String;
+      counts[type] = (counts[type] ?? 0) + 1;
+    }
+    final fixed = [
+      ...editorTypes,
+      ...types.where((t) => !editorTypes.contains(t)),
+    ];
+    return [...fixed]..sort((a, b) {
+      final difference = (counts[b] ?? 0).compareTo(counts[a] ?? 0);
+      return difference != 0
+          ? difference
+          : fixed.indexOf(a).compareTo(fixed.indexOf(b));
+    });
+  }
+
   Record save(
     String kind,
     Map<String, dynamic> data, {
     String? id,
     bool deleted = false,
+    Map<String, Map<String, dynamic>> linkedChanges = const {},
+    int? expectedGeneration,
   }) {
+    if (expectedGeneration != null && generation != expectedGeneration) {
+      throw const FormatException('数据已改变，请重新核对复用范围；尚未保存任何记录');
+    }
+    for (final e in linkedChanges.entries) {
+      final old = get(e.key);
+      if (old == null ||
+          old.deleted ||
+          old.kind != 'item' ||
+          old.data['trip'] != data['trip']) {
+        throw const FormatException('复用目标已改变');
+      }
+      validateData('item', e.value);
+    }
     validateData(kind, data);
     final key = id ?? uuid.v4();
     final old = get(key);
@@ -340,6 +378,19 @@ class Store extends ChangeNotifier {
     db.execute('BEGIN IMMEDIATE');
     try {
       _put(r);
+      for (final e in linkedChanges.entries) {
+        final old = get(e.key)!;
+        _put(
+          Record(
+            old.id,
+            'item',
+            device,
+            old.modified >= now ? old.modified + 1 : now,
+            false,
+            e.value,
+          ),
+        );
+      }
       // Preserve the currently visible anchors before changing a timed record.
       for (final entry in orders.entries) {
         final orderId = 'order:$tripId:${entry.key}';
@@ -452,11 +503,14 @@ class Store extends ChangeNotifier {
       if (rows.any(
         (r) =>
             r.kind == 'item' &&
-            (r.data['locations'] as Map?)?.isNotEmpty == true,
+            ((r.data['locations'] as Map?)?.isNotEmpty == true ||
+                (r.data['activityPlaces'] as List? ?? []).any(
+                  (p) => p['binding'] != null,
+                )),
       ))
         'mapAttribution':
             '© OpenStreetMap contributors, ODbL; https://www.openstreetmap.org/copyright',
-      'version': 5,
+      'version': 6,
       'records': rows
           .where((r) => trip == null || r.id == trip || r.data['trip'] == trip)
           .map((r) => r.toJson())

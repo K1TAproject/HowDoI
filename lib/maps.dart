@@ -19,11 +19,12 @@ Future<bool> openMapUrl(Uri uri) async {
 
 Future<void> openBoundPlace(
   BuildContext context,
-  Map<String, dynamic> binding,
-) async {
+  Map<String, dynamic> binding, {
+  bool fallback = false,
+}) async {
   final url = binding['url'] as String;
   if (mapLinkProvider(url) == null) return;
-  final ok = await openMapUrl(Uri.parse(url));
+  final ok = !fallback && await openMapUrl(Uri.parse(url));
   if (!context.mounted) return;
   if (ok) {
     ScaffoldMessenger.of(
@@ -34,7 +35,7 @@ Future<void> openBoundPlace(
   await showDialog<void>(
     context: context,
     builder: (c) => AlertDialog(
-      title: const Text('无法打开地图网页'),
+      title: Text(fallback ? '地点备用方式' : '无法打开地图网页'),
       content: SelectableText('$url\n绑定已保留。请检查默认浏览器与 HTTPS 关联；此状态不代表网页或地点无效。'),
       actions: [
         TextButton(
@@ -66,87 +67,248 @@ Future<void> openBoundPlace(
   );
 }
 
-class LocationCards extends StatelessWidget {
-  final List<PlanNode> nodes;
-  final ValueChanged<Record> onItem;
-  final bool daily;
-  const LocationCards({
+Future<void> searchPreferences(BuildContext context, Store store) async {
+  var region = store.setting('mapRegion') ?? 'domestic';
+  var provider =
+      store.setting('mapProvider:$region') ??
+      (region == 'domestic' ? 'baidu' : 'google');
+  await showDialog<void>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, set) => AlertDialog(
+        title: const Text('搜索地图偏好'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('仅影响今后的地点搜索，不改变已有地点链接。偏好只保存在本机。'),
+            DropdownButtonFormField<String>(
+              initialValue: region,
+              items: const [
+                DropdownMenuItem(value: 'domestic', child: Text('国内')),
+                DropdownMenuItem(value: 'overseas', child: Text('海外')),
+              ],
+              onChanged: (v) => set(() {
+                region = v!;
+                provider =
+                    store.setting('mapProvider:$region') ??
+                    (region == 'domestic' ? 'baidu' : 'google');
+              }),
+            ),
+            DropdownButtonFormField<String>(
+              key: ValueKey('$region:$provider'),
+              initialValue: provider,
+              items: const [
+                DropdownMenuItem(value: 'baidu', child: Text('百度地图')),
+                DropdownMenuItem(value: 'google', child: Text('Google Maps')),
+                DropdownMenuItem(value: 'amap', child: Text('高德地图网页')),
+              ],
+              onChanged: (v) => set(() => provider = v!),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              store.setSetting('mapRegion', region);
+              store.setSetting('mapProvider:$region', provider);
+              Navigator.pop(c);
+            },
+            child: const Text('保存偏好'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<void> placeFallback(
+  BuildContext context,
+  Store store,
+  Map<String, dynamic> d,
+  String slot,
+) async {
+  final p = locationBinding(d, slot);
+  if (p?['url'] is String) {
+    await openBoundPlace(context, p!, fallback: true);
+    return;
+  }
+  await showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('地点备用方式'),
+      content: SelectableText('${placeText(d, slot)}\n${p?['address'] ?? ''}'),
+      actions: [
+        TextButton(
+          onPressed: () => navigatePlace(c, store, d, slot: slot),
+          child: const Text('重试'),
+        ),
+        TextButton(
+          onPressed: () async {
+            if (store.setting('mapRegion') == null) {
+              await searchPreferences(c, store);
+            }
+            if (!c.mounted || store.setting('mapRegion') == null) return;
+            final provider =
+                store.setting('mapProvider:${store.setting('mapRegion')}') ??
+                'google';
+            final ok = await openMapUrl(
+              mapSearchUri(provider, placeText(d, slot), ''),
+            );
+            if (c.mounted) {
+              ScaffoldMessenger.of(c).showSnackBar(
+                SnackBar(
+                  content: Text(ok ? '已请求打开网页搜索，请核对地点' : '未能打开，地点信息仍保留'),
+                ),
+              );
+            }
+          },
+          child: const Text('网页打开'),
+        ),
+        TextButton(
+          onPressed: () => Clipboard.setData(
+            ClipboardData(
+              text: '${placeText(d, slot)}\n${p?['address'] ?? ''}',
+            ),
+          ),
+          child: const Text('复制地点信息'),
+        ),
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('关闭')),
+      ],
+    ),
+  );
+}
+
+class PlaceLinks extends StatelessWidget {
+  final Store store;
+  final PlanNode node;
+  final VoidCallback onEdit;
+  const PlaceLinks({
     super.key,
-    required this.nodes,
-    required this.onItem,
-    this.daily = false,
+    required this.store,
+    required this.node,
+    required this.onEdit,
   });
   @override
   Widget build(BuildContext context) {
-    final visits = mapVisits(nodes, daily: daily);
-    if (visits.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('尚无地点；添加行程后可绑定地图分享链接。'),
-      );
-    }
+    final d = node.item.data;
+    final visits = mapVisits([
+      node,
+    ], daily: true).where((v) => hasPlace(d, v.slot)).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var i = 0; i < visits.length; i++)
+        for (final v in visits)
           Builder(
             builder: (c) {
-              final v = visits[i],
-                  p = locationBinding(visits[i].node.item.data, visits[i].slot);
-              return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              final binding = locationBinding(d, v.slot),
+                  text = placeText(d, v.slot);
+              final label = text.isNotEmpty ? text : binding?['name'] ?? '地点';
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Text(
-                        '${i + 1}. ${p?['name'] == null || p!['name'] == ''
-                            ? v.label.isEmpty
-                                  ? itemTitle(v.node.item.data)
-                                  : v.label
-                            : p['name']}',
-                        style: Theme.of(c).textTheme.titleMedium,
+                      Expanded(
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            alignment: Alignment.centerLeft,
+                            minimumSize: const Size(48, 48),
+                          ),
+                          onPressed: () =>
+                              navigatePlace(c, store, d, slot: v.slot),
+                          child: Text(
+                            binding?['url'] != null
+                                ? label
+                                : '${binding == null || v.stale ? '搜索地点' : '导航'} · $label',
+                          ),
+                        ),
                       ),
-                      if (p?['address'] is String && p!['address'] != '')
-                        Text(p['address']),
-                      Text(
-                        '${itemTitle(v.node.item.data)} · ${v.node.day == 0 ? '历史未安排' : '第 ${v.node.day} 天'} ${v.node.time} · ${v.slot == 'origin'
-                            ? '起点'
-                            : v.slot == 'destination'
-                            ? '终点'
-                            : v.node.stay
-                            ? '住宿覆盖'
-                            : '地点'}',
-                      ),
-                      Text(
-                        p == null ? '尚未绑定地点' : mapProviderName(p['provider']),
-                      ),
-                      if (v.stale) const Text('文字已改变，请核对原绑定'),
-                      if (p != null && p['url'] == null)
-                        const Text('历史坐标已保留；可绑定网页链接，不自动转换或搜索位置。'),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          if (p?['url'] is String)
-                            TextButton.icon(
-                              icon: const Icon(Icons.open_in_new),
-                              label: const Text('打开地图网页'),
-                              onPressed: () => openBoundPlace(c, p!),
-                            ),
-                          TextButton.icon(
-                            icon: const Icon(Icons.edit_outlined),
-                            label: Text(p == null ? '绑定地点' : '编辑行程'),
-                            onPressed: () => onItem(v.node.item),
+                      PopupMenuButton<String>(
+                        tooltip: '地点操作',
+                        onSelected: (a) {
+                          if (a == 'edit') {
+                            onEdit();
+                          } else if (a == 'preferences') {
+                            searchPreferences(c, store);
+                          } else if (binding?['url'] is String) {
+                            openBoundPlace(c, binding!, fallback: true);
+                          } else {
+                            placeFallback(c, store, d, v.slot);
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Text(binding == null ? '绑定地点' : '管理绑定'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'preferences',
+                            child: Text('搜索地图偏好'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'fallback',
+                            child: Text('备用方式'),
                           ),
                         ],
                       ),
                     ],
                   ),
-                ),
+                  if (v.stale)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Text('⚠ 名称已修改，请核对绑定地点'),
+                    ),
+                ],
               );
             },
           ),
       ],
+    );
+  }
+}
+
+class UnboundPlaces extends StatelessWidget {
+  final List<PlanNode> nodes;
+  final ValueChanged<Record> onItem;
+  const UnboundPlaces({super.key, required this.nodes, required this.onItem});
+  @override
+  Widget build(BuildContext context) {
+    final missing = mapVisits(nodes, daily: true)
+        .where(
+          (v) =>
+              placeText(v.node.item.data, v.slot).isNotEmpty &&
+              locationBinding(v.node.item.data, v.slot) == null,
+        )
+        .toList();
+    if (missing.isEmpty) return const SizedBox.shrink();
+    return TextButton(
+      onPressed: () async {
+        if (missing.length == 1) {
+          onItem(missing.single.node.item);
+          return;
+        }
+        final r = await showDialog<Record>(
+          context: context,
+          builder: (c) => SimpleDialog(
+            title: const Text('选择未绑定地点'),
+            children: [
+              for (final v in missing)
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(c, v.node.item),
+                  child: Text(
+                    '${placeText(v.node.item.data, v.slot)} · ${itemTitle(v.node.item.data)}',
+                  ),
+                ),
+            ],
+          ),
+        );
+        if (r != null && context.mounted) onItem(r);
+      },
+      child: Text('有 ${missing.length} 个地点未绑定'),
     );
   }
 }
@@ -158,51 +320,23 @@ Future<void> navigatePlace(
   String? slot,
   bool options = false,
 }) async {
-  final target = slot ?? (isTransport(d['type']) ? 'destination' : 'place');
+  final target =
+      slot ??
+      (isTransport(d['type'])
+          ? 'destination'
+          : placeSlots(d).firstOrNull ?? 'place');
   final binding = locationBinding(d, target);
-  if (Theme.of(context).platform == TargetPlatform.windows &&
-      binding?['url'] is String) {
-    await openBoundPlace(context, binding!);
+  if (options) {
+    await searchPreferences(context, store);
     return;
   }
-  if (binding?['url'] is String && !placeStale(d, target)) {
-    final url = Uri.parse(binding!['url']);
-    if (!options && await openMapUrl(url)) return;
-    if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('外部地图链接已绑定'),
-        content: SelectableText(
-          '${binding['name']}\n${binding['url']}\n尚无新地点的可靠坐标。打开后请在外部地图中选择导航。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              final ok = await openMapUrl(url);
-              if (c.mounted) {
-                ScaffoldMessenger.of(c).showSnackBar(
-                  SnackBar(
-                    content: Text(ok ? '已请求打开原链接' : '原链接打开失败，请复制后在浏览器或地图中打开'),
-                  ),
-                );
-              }
-            },
-            child: const Text('打开原链接'),
-          ),
-          TextButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: binding['url']));
-            },
-            child: const Text('复制链接'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(c),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
+  if (binding?['url'] is String) {
+    if (placeStale(d, target)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('名称已修改，请核对绑定地点')));
+    }
+    await openBoundPlace(context, binding!);
     return;
   }
   final p = placeStale(d, target) ? null : linkedPlace(d, target);
@@ -396,9 +530,7 @@ class NavigationActions extends StatelessWidget {
             : navigationSlot(node!));
     final valid =
         linkedPlace(data, target) != null && !placeStale(data, target);
-    final hasLink =
-        locationBinding(data, target)?['url'] is String &&
-        !placeStale(data, target);
+    final hasLink = locationBinding(data, target)?['url'] is String;
     final label = Theme.of(context).platform == TargetPlatform.windows
         ? (locationBinding(data, target)?['url'] is String
               ? '打开地图网页'
@@ -448,7 +580,7 @@ class NavigationActions extends StatelessWidget {
           itemBuilder: (_) => [
             if (origin && target != 'origin')
               const PopupMenuItem(value: 'origin', child: Text('前往起点')),
-            const PopupMenuItem(value: 'preferences', child: Text('地图偏好与备用方式')),
+            const PopupMenuItem(value: 'preferences', child: Text('搜索地图偏好')),
           ],
         ),
       ],

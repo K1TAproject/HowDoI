@@ -210,7 +210,7 @@ class SyncService extends ChangeNotifier {
         return;
       }
       final envelope = jsonDecode(text);
-      if (envelope is Map && envelope['version'] != 5) {
+      if (envelope is Map && envelope['version'] != 6) {
         request.response.statusCode = 409;
         request.response.write('数据协议不兼容，请更新两端应用；未合并任何记录');
         _status('旧版客户端不兼容 · 请更新两端版本');
@@ -225,7 +225,7 @@ class SyncService extends ChangeNotifier {
         return;
       }
       if (request.uri.path == '/hello') {
-        request.response.write(jsonEncode({'app': 'howdoi', 'version': 5}));
+        request.response.write(jsonEncode({'app': 'howdoi', 'version': 6}));
         return;
       }
       final rows = decodeRecords(text, format: 'howdoi-sync');
@@ -514,7 +514,7 @@ class SyncService extends ChangeNotifier {
     var candidate = Map<String, dynamic>.from(m);
     try {
       final body = jsonEncode({
-        'version': 5,
+        'version': 6,
         'sentAt': DateTime.now().millisecondsSinceEpoch,
       });
       String response;
@@ -552,7 +552,7 @@ class SyncService extends ChangeNotifier {
         response = result;
       }
       final hello = jsonDecode(response);
-      if (hello is! Map || hello['app'] != 'howdoi' || hello['version'] != 5) {
+      if (hello is! Map || hello['app'] != 'howdoi' || hello['version'] != 6) {
         throw const FormatException('数据协议不兼容，请更新两端应用');
       }
       if (epoch != _epoch || _disposed) throw const FormatException('配对已取消');

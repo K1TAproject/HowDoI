@@ -53,7 +53,7 @@ void main() {
         'previousPosition': place('酒店'),
       };
       final r = a.save('item', {
-        ...itemData(trip.id, '酒店'),
+        ...itemData(trip.id, '酒店', type: '餐饮'),
         'locations': {'place': binding},
       });
       expect(linkedPlace(r.data, 'place'), isNull);
@@ -87,7 +87,7 @@ void main() {
       final s = Store(':memory:');
       final trip = s.save('trip', tripData());
       final r = s.save('item', {
-        ...itemData(trip.id, '酒店'),
+        ...itemData(trip.id, '酒店', type: '餐饮'),
         'locations': {'place': place('酒店')},
       });
       final key = GlobalKey<ItemEditorState>();
@@ -125,8 +125,8 @@ void main() {
         ),
       );
       await t.pumpAndSettle();
-      await t.ensureVisible(find.text('更换 / 核对'));
-      await t.tap(find.text('更换 / 核对'));
+      await t.ensureVisible(find.text('更换绑定'));
+      await t.tap(find.text('更换绑定'));
       await t.pumpAndSettle();
       expect(find.byType(ExternalBindingPage), findsOneWidget);
       expect(find.text('选择地点'), findsNothing);
@@ -174,8 +174,8 @@ void main() {
       await t.tap(find.text('打开地图地点'));
       await t.pumpAndSettle();
       expect(opened.last, google);
-      await t.ensureVisible(find.text('解除关联'));
-      await t.tap(find.text('解除关联'));
+      await t.ensureVisible(find.text('解除绑定'));
+      await t.tap(find.text('解除绑定'));
       await t.pump();
       expect(locationBinding(key.currentState!.value(), 'place'), isNull);
       expect(locationBinding(s.get(r.id)!.data, 'place')!['url'], google);

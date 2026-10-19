@@ -1,3 +1,4 @@
+import 'places.dart';
 import 'package:flutter/material.dart';
 import 'model.dart';
 import 'planner.dart';
@@ -82,6 +83,12 @@ class TripOverviewData {
       ].where((s) => s.trim().isNotEmpty).toList();
     }
     if (n.end || n.stay && n.day != d['day']) return [];
+    if (multiPlace(d)) {
+      return activityPlaces(d)
+          .map((p) => p['name'] as String)
+          .where((n) => n.trim().isNotEmpty)
+          .toList();
+    }
     final address = fieldText(d, 'address').trim();
     if (address.isNotEmpty) return [address];
     if (d['type'] == '住宿' && (d['name'] as String).trim().isNotEmpty) {
@@ -149,11 +156,14 @@ class TripOverview extends StatelessWidget {
           trailing: const Icon(Icons.chevron_right),
           onTap: () => onItem(n.item),
         ),
-        if (Theme.of(context).platform == TargetPlatform.android)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: NavigationActions(store: store, data: n.item.data, node: n),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: PlaceLinks(
+            store: store,
+            node: n,
+            onEdit: () => onItem(n.item),
           ),
+        ),
       ],
     );
     final currenciesPresent = currencies.where(
@@ -222,70 +232,6 @@ class TripOverview extends StatelessWidget {
               ],
             ),
           ),
-        if (Theme.of(context).platform == TargetPlatform.windows) ...[
-          heading('旅行地点'),
-          ExpansionTile(
-            key: PageStorageKey('overview-map:${trip.id}'),
-            initiallyExpanded: true,
-            title: const Text('地点卡片'),
-            children: [
-              LocationCards(
-                nodes: [
-                  for (final day in [...data.days, 0]) ...data.byDay[day]!,
-                ],
-                onItem: onItem,
-              ),
-            ],
-          ),
-        ],
-        if (Theme.of(context).platform != TargetPlatform.windows) ...[
-          heading('地点与到访顺序'),
-          const Text(
-            '按现有行程顺序列出；行与行之间仅表示先后，不代表交通连接。跨日交通在出发日列起点、到达日列终点；住宿覆盖日不重复推定到访。',
-            style: TextStyle(fontSize: 12),
-          ),
-          if (data.placeNames.isEmpty) const ListTile(title: Text('尚无明确记录的地点')),
-          if (data.placeNames.isNotEmpty)
-            ExpansionTile(
-              key: PageStorageKey('overview-places:${trip.id}'),
-              title: Text('地点清单 · ${data.placeNames.length} 个名称'),
-              subtitle: const Text('包含历史未安排记录；仅合并首尾空白处理后完全相同的名称'),
-              children: [
-                for (final name in data.placeNames) ListTile(title: Text(name)),
-              ],
-            ),
-          for (final day in data.days.where(
-            (d) => data.route(d).isNotEmpty,
-          )) ...[
-            Text(
-              dayLabel(trip, day),
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            for (final n in data.route(day))
-              ListTile(
-                title: Text(
-                  isTransport(n.item.data['type']) &&
-                          n.item.data['type'] != '租车' &&
-                          !n.end &&
-                          n.item.data['day'] == n.item.data['endDay'] &&
-                          data.places(n).length == 2
-                      ? data.places(n).join(' → ')
-                      : data.places(n).join(' · '),
-                ),
-                subtitle: Text(
-                  '${n.item.data['type'] == '租车'
-                      ? '取还车安排'
-                      : isTransport(n.item.data['type'])
-                      ? '已记录${n.end ? '抵达' : '交通'}'
-                      : '行程位置'} · ${overviewItemDetail(trip, n)}',
-                ),
-                onTap: () => onItem(n.item),
-                trailing: const Icon(Icons.chevron_right),
-              ),
-          ],
-          if (data.items.any((r) => r.data['day'] == 0))
-            const Text('历史未安排记录的地点不插入到访顺序，可在上方记录中查看。'),
-        ],
         heading('预计预算 · 原币种'),
         Text('未估算费用 ${data.unknownCosts} 笔 · ${data.noBudgetItems} 条行程未填写预算'),
         if (currenciesPresent.isEmpty) const ListTile(title: Text('暂无预算条目')),
@@ -352,7 +298,7 @@ class TripOverview extends StatelessWidget {
                     for (final entry in costs)
                       ListTile(
                         title: Text(
-                          '${entry.cost['label'] == '' ? '未命名费用' : entry.cost['label']} · $currency ${entry.cost['amount'] == '' ? '未估算' : formatUnits(decimalUnits(entry.cost['amount'], digits(currency)), digits(currency))}',
+                          '${itemTitle(entry.item.data)} · $currency ${entry.cost['amount'] == '' ? '未估算' : formatUnits(decimalUnits(entry.cost['amount'], digits(currency)), digits(currency))}',
                         ),
                         subtitle: Text(
                           '${itemTitle(entry.item.data)} · ${entry.item.data['day'] == 0 ? '历史未安排日期' : dayLabel(trip, entry.item.data['day'])}',

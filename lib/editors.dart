@@ -271,7 +271,7 @@ class ItemEditorState extends State<ItemEditor> {
         builder: (_) => ExternalBindingPage(
           store: widget.store,
           tripId: widget.trip.id,
-          itemId: widget.item?.id,
+          itemId: savedId,
           target:
               '${widget.trip.data['name']} / ${d['name'] == '' ? d['type'] : d['name']}',
           slot: slot,
@@ -281,12 +281,324 @@ class ItemEditorState extends State<ItemEditor> {
       ),
     );
     if (picked != null && mounted) {
+      setState(() {
+        setBinding(draft, slot, picked);
+      });
+    }
+  }
+
+  String? savedId;
+  late List<Map<String, dynamic>> costRows;
+  Map<String, dynamic> blankCost({bool placeholder = false}) => {
+    'id': uuid.v4(),
+    'label': '',
+    'amount': '',
+    'currency': widget.trip.data['base'],
+    'category': isTransport(draft['type'])
+        ? '交通'
+        : draft['type'] == '住宿'
+        ? '住宿'
+        : '其他',
+    if (placeholder) '_placeholder': true,
+  };
+  Future<bool> saveWithReuse({bool close = true}) async {
+    final generation = widget.store.generation;
+    final plan = PlaceReusePlan(
+      widget.store.items(widget.trip.id),
+      value(),
+      savedId,
+    );
+    if (plan.count > 0) {
+      final yes =
+          await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: Text('自动复用 ${plan.count} 个地点绑定'),
+              content: SingleChildScrollView(
+                child: Text(
+                  '仅补齐同旅行内同名且唯一的绑定，不替换已有绑定。\n${plan.affected.join('\n')}\n确认后与当前行程一起保存；取消不修改任何记录。',
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  child: const Text('确认'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!yes || !mounted) return false;
+    }
+    return save(close: close, reuse: plan, expectedGeneration: generation);
+  }
+
+  Future<void> reuseExisting(String slot) async {
+    final d = value();
+    final candidates =
+        reusableBindings([
+          d,
+          ...widget.store
+              .items(widget.trip.id)
+              .where((r) => r.id != savedId)
+              .map((r) => r.data),
+        ])[placeText(d, slot)] ??
+        [];
+    if (candidates.isEmpty) {
+      notice(context, '本旅行没有同名且无需核对的绑定');
+      return;
+    }
+    final picked = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('选择要复用的绑定'),
+        children: [
+          for (final p in candidates)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, p),
+              child: Text(
+                '${mapProviderName(p['provider'])} · ${p['name']}\n${p['url'] ?? p['address']}',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked != null && mounted) {
       setState(
-        () =>
-            draft['locations'] = {...?draft['locations'] as Map?, slot: picked},
+        () => setBinding(draft, slot, {
+          ...picked,
+          'sourceText': placeText(value(), slot),
+        }),
       );
     }
   }
+
+  Widget bindingControls(String slot) {
+    final d = value(), p = locationBinding(d, slot);
+    final choices = p == null
+        ? (reusableBindings([
+                d,
+                ...widget.store
+                    .items(widget.trip.id)
+                    .where((r) => r.id != savedId)
+                    .map((r) => r.data),
+              ])[placeText(d, slot)] ??
+              [])
+        : [];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (p != null)
+          Text(
+            '${mapProviderName(p['provider'])} · ${p['name']} · ${p['address']}',
+          ),
+        if (placeStale(d, slot)) const Text('名称已修改，请核对绑定地点'),
+        if (choices.length > 1) const Text('同名地点有多个绑定，请通过“复用已有绑定”自行选择。'),
+        Wrap(
+          spacing: 8,
+          children: [
+            FilledButton.tonal(
+              onPressed: () => bindExternal(slot),
+              child: Text(p == null ? '绑定${placeSlotLabel(slot)}' : '更换绑定'),
+            ),
+            if (p != null && placeStale(d, slot))
+              TextButton(
+                onPressed: () => setState(
+                  () => setBinding(draft, slot, {
+                    ...p,
+                    'sourceText': placeText(value(), slot),
+                  }),
+                ),
+                child: const Text('确认仍是此地点'),
+              ),
+            if (p != null)
+              TextButton(
+                onPressed: () => setState(
+                  () => setBinding(draft, slot, null, blockReuse: true),
+                ),
+                child: const Text('解除绑定'),
+              ),
+            if (p == null)
+              TextButton(
+                onPressed: () => reuseExisting(slot),
+                child: const Text('复用已有绑定'),
+              ),
+            NavigationActions(store: widget.store, data: d, slot: slot),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget placeEditor() {
+    if (multiPlace(draft)) {
+      final points = activityPlaces(draft);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('活动地点（可选，按保存顺序展示）'),
+          for (var i = 0; i < points.length; i++)
+            Card(
+              key: ValueKey(points[i]['id']),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextFormField(
+                      initialValue: points[i]['name'],
+                      maxLength: 2000,
+                      decoration: InputDecoration(labelText: '地点 ${i + 1} 名称'),
+                      onChanged: (v) => setState(
+                        () => draft['activityPlaces'][i]['name'] = v,
+                      ),
+                    ),
+                    Wrap(
+                      children: [
+                        IconButton(
+                          tooltip: '地点上移',
+                          onPressed: i == 0
+                              ? null
+                              : () => setState(() {
+                                  final p = (draft['activityPlaces'] as List)
+                                      .removeAt(i);
+                                  draft['activityPlaces'].insert(i - 1, p);
+                                }),
+                          icon: const Icon(Icons.arrow_upward),
+                        ),
+                        IconButton(
+                          tooltip: '地点下移',
+                          onPressed: i == points.length - 1
+                              ? null
+                              : () => setState(() {
+                                  final p = (draft['activityPlaces'] as List)
+                                      .removeAt(i);
+                                  draft['activityPlaces'].insert(i + 1, p);
+                                }),
+                          icon: const Icon(Icons.arrow_downward),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(
+                            () => draft['activityPlaces'].removeAt(i),
+                          ),
+                          child: const Text('移除地点条目'),
+                        ),
+                      ],
+                    ),
+                    bindingControls('activity:${points[i]['id']}'),
+                  ],
+                ),
+              ),
+            ),
+          TextButton.icon(
+            onPressed: () => setState(
+              () => draft['activityPlaces'].add({'id': uuid.v4(), 'name': ''}),
+            ),
+            icon: const Icon(Icons.add),
+            label: const Text('添加地点'),
+          ),
+        ],
+      );
+    }
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        name,
+        field('address'),
+        field('origin'),
+        field('destination'),
+      ]),
+      builder: (c, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('地图地点（可选）'),
+          for (final slot in placeSlots(value()))
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [Text(placeSlotLabel(slot)), bindingControls(slot)],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget budgetEditor() => ExpansionTile(
+    title: const Text('预计预算'),
+    children: [
+      for (final row in costRows)
+        Padding(
+          key: ValueKey(row['id']),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: choice(
+                      '币种',
+                      row['currency'],
+                      currencies,
+                      (v) => setState(() => row['currency'] = v!),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: row['amount'],
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(labelText: '预计金额'),
+                      onChanged: (v) {
+                        setState(() {
+                          row['amount'] = v.trim();
+                          if (v.trim().isNotEmpty) row.remove('_placeholder');
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: choice(
+                      '分类',
+                      row['category'],
+                      categories,
+                      (v) => setState(() => row['category'] = v!),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '移除费用',
+                    onPressed: () => setState(() => costRows.remove(row)),
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+              if (row['_placeholder'] == true)
+                TextButton(
+                  onPressed: () => setState(() => row.remove('_placeholder')),
+                  child: const Text('记为未估算'),
+                )
+              else if (row['amount'] == '')
+                const Text('未估算'),
+            ],
+          ),
+        ),
+      TextButton.icon(
+        onPressed: () => setState(() => costRows.add(blankCost())),
+        icon: const Icon(Icons.add),
+        label: const Text('增加费用行'),
+      ),
+    ],
+  );
 
   final pickerKey = GlobalKey<PickerRegionState>();
   int? openedModified;
@@ -304,6 +616,7 @@ class ItemEditorState extends State<ItemEditor> {
         if (mounted) bindExternal(widget.bindingSlot!);
       });
     }
+    savedId = widget.item?.id;
     openedModified = widget.item?.modified;
     draft = widget.item == null
         ? {
@@ -321,10 +634,19 @@ class ItemEditorState extends State<ItemEditor> {
         : Map<String, dynamic>.from(
             jsonDecode(jsonEncode(widget.item!.data)) as Map,
           );
+    if (multiPlace(draft)) {
+      draft['activityPlaces'] = activityPlaces(draft);
+      final locations = Map<String, dynamic>.from(
+        draft['locations'] as Map? ?? {},
+      );
+      locations.remove('place');
+      draft['locations'] = locations;
+    }
+    costRows = [for (final c in draft['costs']) Map<String, dynamic>.from(c)];
+    if (costRows.isEmpty) costRows.add(blankCost(placeholder: true));
     name = TextEditingController(text: draft['name']);
     note = TextEditingController(text: draft['note']);
     tripModified = widget.trip.modified;
-    draft['type'] = itemType(draft);
     if (widget.item?.data['type'] == '自驾' &&
         (draft['fields']['mode'] ?? '') == '') {
       draft['fields']['mode'] = '自驾';
@@ -342,6 +664,10 @@ class ItemEditorState extends State<ItemEditor> {
   );
   Map<String, dynamic> value() {
     final d = Map<String, dynamic>.from(draft);
+    d['costs'] = [
+      for (final c in costRows)
+        if (c['_placeholder'] != true) {...c}..remove('_placeholder'),
+    ];
     d['name'] = name.text.trim();
     d['note'] = note.text;
     d['fields'] = {
@@ -364,100 +690,22 @@ class ItemEditorState extends State<ItemEditor> {
     super.dispose();
   }
 
-  Future<void> cost([int? index]) async {
-    final old = index == null ? null : draft['costs'][index] as Map;
-    final label = TextEditingController(text: old?['label'] ?? '');
-    final amount = TextEditingController(text: old?['amount'] ?? '');
-    var currency =
-        old?['currency'] as String? ?? widget.trip.data['base'] as String;
-    var category =
-        old?['category'] as String? ??
-        (isTransport(draft['type'])
-            ? '交通'
-            : draft['type'] == '住宿'
-            ? '住宿'
-            : '其他');
-    await formDialog<void>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, set) => AlertDialog(
-          title: const Text('预计费用'),
-          content: SizedBox(
-            width: 400,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Input('费用名称', label),
-                  Input('预计金额（空为未估算，0 为免费）', amount),
-                  choice(
-                    '币种',
-                    currency,
-                    currencies,
-                    (v) => set(() => currency = v!),
-                  ),
-                  choice(
-                    '分类',
-                    category,
-                    categories,
-                    (v) => set(() => category = v!),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                try {
-                  if (amount.text.trim().isNotEmpty) {
-                    decimalUnits(amount.text.trim(), digits(currency));
-                  }
-                  final entry = {
-                    'id': old?['id'] ?? uuid.v4(),
-                    'label': label.text.trim(),
-                    'amount': amount.text.trim(),
-                    'currency': currency,
-                    'category': category,
-                  };
-                  setState(() {
-                    if (index == null) {
-                      draft['costs'].add(entry);
-                    } else {
-                      draft['costs'][index] = entry;
-                    }
-                  });
-                  Navigator.pop(c);
-                } catch (e) {
-                  notice(c, e);
-                }
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        ),
-      ),
-    );
-    label.dispose();
-    amount.dispose();
-  }
-
-  bool save({bool close = true}) {
+  bool save({
+    bool close = true,
+    PlaceReusePlan? reuse,
+    int? expectedGeneration,
+  }) {
     try {
       final trip = widget.store.get(widget.trip.id);
       if (trip?.deleted != false) throw const FormatException('旅行已删除');
       if (trip!.modified != tripModified) {
         throw const FormatException('旅行设置已改变，请关闭后重新打开');
       }
-      if (widget.item != null &&
-          widget.store.get(widget.item!.id)?.modified != openedModified) {
+      if (savedId != null &&
+          widget.store.get(savedId!)?.modified != openedModified) {
         throw const FormatException('活动已在其他设备修改，请关闭后重新打开');
       }
-      final d = value();
+      final d = reuse?.current ?? value();
       if (d['day'] == 0) throw const FormatException('请先为行程选择旅行日');
       if (d['booking'] == '已预订') {
         for (final end in [false, true]) {
@@ -467,7 +715,16 @@ class ItemEditorState extends State<ItemEditor> {
           }
         }
       }
-      widget.store.save('item', d, id: widget.item?.id);
+      final saved = widget.store.save(
+        'item',
+        d,
+        id: savedId,
+        linkedChanges: reuse?.others ?? {},
+        expectedGeneration: expectedGeneration,
+      );
+      savedId = saved.id;
+      openedModified = saved.modified;
+      draft = d;
       initialValue = jsonEncode(value());
       if (close) widget.onClose();
       return true;
@@ -504,7 +761,8 @@ class ItemEditorState extends State<ItemEditor> {
       ),
     );
     if (!mounted) return false;
-    return answer == 'discard' || (answer == 'save' && save(close: false));
+    return answer == 'discard' ||
+        (answer == 'save' && await saveWithReuse(close: false));
   }
 
   Widget clock(String key, String label, {bool duration = false}) {
@@ -582,7 +840,18 @@ class ItemEditorState extends State<ItemEditor> {
       main.add(detail(key, label));
     }
 
-    if (!transport) main.add(Input(stay ? '住宿名称（可空）' : '地点或安排内容（可空）', name));
+    if (!transport) {
+      main.add(
+        Input(
+          stay
+              ? '住宿名称（可空）'
+              : multiPlace(draft)
+              ? '活动标题（可空）'
+              : '地点或安排内容（可空）',
+          name,
+        ),
+      );
+    }
     if (scheduled) {
       add(
         'number',
@@ -741,17 +1010,29 @@ class ItemEditorState extends State<ItemEditor> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                choice(
-                  '活动类型',
-                  type,
-                  editorTypes,
-                  (v) => setState(() {
-                    draft['type'] = v!;
+                PopupMenuButton<String>(
+                  tooltip: '选择活动类型',
+                  itemBuilder: (_) => [
+                    for (final t in widget.store.frequentTypes())
+                      PopupMenuItem(value: t, child: Text(t)),
+                  ],
+                  onSelected: (v) => setState(() {
+                    draft['type'] = v;
+                    if (multiPlace(draft) && draft['activityPlaces'] == null) {
+                      draft['activityPlaces'] = activityPlaces(draft);
+                    }
                     if (v == '住宿' && draft['endDay'] <= draft['day']) {
                       draft['endDay'] = 0;
                       field('endDate').clear();
                     }
                   }),
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '活动类型',
+                      suffixIcon: Icon(Icons.arrow_drop_down),
+                    ),
+                    child: Text(type),
+                  ),
                 ),
                 ...main,
                 if (scheduled || stay || rental)
@@ -767,86 +1048,7 @@ class ItemEditorState extends State<ItemEditor> {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text('地图地点（可选）'),
-                    for (final slot in placeSlots(value()))
-                      AnimatedBuilder(
-                        animation: Listenable.merge([
-                          name,
-                          field('address'),
-                          field('origin'),
-                          field('destination'),
-                        ]),
-                        builder: (context, _) {
-                          final d = value(), p = locationBinding(value(), slot);
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  slot == 'origin'
-                                      ? '起点'
-                                      : slot == 'destination'
-                                      ? '终点'
-                                      : '地点',
-                                ),
-                                Text(
-                                  p == null
-                                      ? '尚未关联地点'
-                                      : '${mapProviderName(p['provider'])} · ${p['name']} · ${p['address']}',
-                                ),
-                                if (placeStale(d, slot))
-                                  Text(
-                                    '文字地点已改变，请核对并重新确认位置',
-                                    style: TextStyle(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.error,
-                                    ),
-                                  ),
-                                Wrap(
-                                  spacing: 8,
-                                  children: [
-                                    FilledButton.tonal(
-                                      onPressed: () => bindExternal(slot),
-                                      child: Text(
-                                        p == null
-                                            ? '绑定${placeSlotLabel(slot)}'
-                                            : '更换 / 核对',
-                                      ),
-                                    ),
-                                    if (p != null)
-                                      TextButton(
-                                        onPressed: () => setState(() {
-                                          final locations =
-                                              Map<String, dynamic>.from(
-                                                draft['locations'],
-                                              );
-                                          locations.remove(slot);
-                                          draft['locations'] = locations;
-                                        }),
-                                        child: const Text('解除关联'),
-                                      ),
-                                    NavigationActions(
-                                      store: widget.store,
-                                      data: d,
-                                      slot: slot,
-                                    ),
-                                    if (!hasPlace(d, slot))
-                                      const Text('可填写地点文字或点击设置地点'),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                  ],
-                ),
-                Input('备注', note, lines: 3),
+                placeEditor(),
                 ExpansionTile(
                   title: const Text('补充信息'),
                   children: [
@@ -923,29 +1125,7 @@ class ItemEditorState extends State<ItemEditor> {
                         ),
                   ],
                 ),
-                ExpansionTile(
-                  title: const Text('预计预算'),
-                  children: [
-                    TextButton.icon(
-                      onPressed: cost,
-                      icon: const Icon(Icons.add),
-                      label: const Text('增加费用'),
-                    ),
-                    for (var i = 0; i < (draft['costs'] as List).length; i++)
-                      ListTile(
-                        title: Text(
-                          '${draft['costs'][i]['label']} · ${draft['costs'][i]['amount']} ${draft['costs'][i]['currency']}',
-                        ),
-                        onTap: () => cost(i),
-                        trailing: IconButton(
-                          tooltip: '移除费用',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () =>
-                              setState(() => draft['costs'].removeAt(i)),
-                        ),
-                      ),
-                  ],
-                ),
+                budgetEditor(),
                 SwitchListTile(
                   title: const Text('已完成'),
                   value: draft['done'],
@@ -973,7 +1153,7 @@ class ItemEditorState extends State<ItemEditor> {
                 ),
               const Spacer(),
               FilledButton.icon(
-                onPressed: () => save(),
+                onPressed: () => saveWithReuse(),
                 icon: const Icon(Icons.check),
                 label: const Text('保存行程'),
               ),
