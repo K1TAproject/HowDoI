@@ -129,7 +129,7 @@ void main() {
       await t.tap(find.text('更换 / 核对'));
       await t.pumpAndSettle();
       expect(find.byType(ExternalBindingPage), findsOneWidget);
-      expect(find.byType(PlaceMap), findsNothing);
+      expect(find.text('选择地点'), findsNothing);
       expect(find.text('搜索服务设置'), findsNothing);
       inbox = {'id': 'one', 'text': '我选的酒店 $google 和 $baidu'};
       await MapShareInbox.instance.refresh();

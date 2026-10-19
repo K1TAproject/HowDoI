@@ -285,8 +285,8 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
   if (m is! Map ||
       m['format'] != format ||
       (format == 'howdoi-sync'
-          ? m['version'] != 4
-          : ![1, 2, 3, 4].contains(m['version'])) ||
+          ? m['version'] != 5
+          : ![1, 2, 3, 4, 5].contains(m['version'])) ||
       m['records'] is! List ||
       m['records'].length > 20000) {
     throw const FormatException('不是受支持的 HowDoI 数据文件');

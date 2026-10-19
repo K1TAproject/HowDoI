@@ -44,6 +44,7 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
   String? selected, shareId, error, region;
   List<String> links = [];
   bool launching = false;
+  bool get windows => Theme.of(context).platform == TargetPlatform.windows;
   @override
   void initState() {
     super.initState();
@@ -70,7 +71,7 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
       links = sharedMapLinks(shared.text);
       selected = links.length == 1 ? links.single : null;
       error = links.isEmpty
-          ? '未识别到受支持的百度或 Google 地图 HTTPS 链接。请复制地点分享链接，不会自动绑定。'
+          ? '未识别到受支持的百度、Google 或高德 地图 HTTPS 链接。请复制地点分享链接，不会自动绑定。'
           : null;
     });
   }
@@ -110,12 +111,18 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
       'name': '${query.text.trim()} ${area.text.trim()}',
       'fields': <String, dynamic>{},
     };
-    final ok = await openMapUrl(navigationUri(provider, d, 'place', web: web));
+    final ok = await openMapUrl(
+      windows || provider == 'amap'
+          ? mapSearchUri(provider, query.text.trim(), area.text.trim())
+          : navigationUri(provider, d, 'place', web: web),
+    );
     if (mounted) {
       setState(() {
         launching = false;
         error = ok
-            ? '已请求打开搜索。请在地图中选定地点，分享至 HowDoI；也可复制链接后返回粘贴。'
+            ? (windows
+                  ? '已请求浏览器打开。选定地点后复制分享内容，返回此处粘贴；尚未验证网页加载或地点。'
+                  : '已请求打开搜索。请在地图中选定地点，分享至 HowDoI；也可复制链接后返回粘贴。')
             : '无法唤起地图，请尝试网页搜索或粘贴地图链接。';
       });
     }
@@ -161,6 +168,7 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                     decoration: const InputDecoration(labelText: '搜索地图（记住偏好）'),
                     items: const [
                       DropdownMenuItem(value: 'baidu', child: Text('百度地图')),
+                      DropdownMenuItem(value: 'amap', child: Text('高德地图网页')),
                       DropdownMenuItem(
                         value: 'google',
                         child: Text('Google Maps'),
@@ -177,12 +185,13 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                   children: [
                     FilledButton(
                       onPressed: launching ? null : () => search(),
-                      child: const Text('打开地图搜索'),
+                      child: Text(windows ? '打开地图网页搜索' : '打开地图搜索'),
                     ),
-                    TextButton(
-                      onPressed: launching ? null : () => search(web: true),
-                      child: const Text('网页搜索'),
-                    ),
+                    if (!windows)
+                      TextButton(
+                        onPressed: launching ? null : () => search(web: true),
+                        child: const Text('网页搜索'),
+                      ),
                   ],
                 ),
                 TextField(
@@ -194,7 +203,7 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                 ),
                 TextButton.icon(
                   icon: const Icon(Icons.paste),
-                  label: const Text('粘贴地图链接'),
+                  label: const Text('粘贴地图分享内容'),
                   onPressed: () async {
                     final v = await Clipboard.getData(Clipboard.kTextPlain);
                     if (!mounted) return;
@@ -207,9 +216,7 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                 if (links.length > 1) const Text('收到多个链接，请明确选择本次绑定的地点：'),
                 for (final link in links)
                   ListTile(
-                    title: Text(
-                      mapLinkProvider(link) == 'baidu' ? '百度地图' : 'Google Maps',
-                    ),
+                    title: Text(mapProviderName(mapLinkProvider(link))),
                     subtitle: Text(link),
                     leading: Icon(
                       selected == link
@@ -228,7 +235,9 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                   maxLength: 2000,
                   decoration: const InputDecoration(labelText: '地址或说明（可选，请核对）'),
                 ),
-                const Text('仅绑定原地图链接，不解析坐标；请确认分享的是地点，而非地图视角或路线。'),
+                const Text(
+                  '未解析地点详情。仅绑定原链接，不代表地点已准确验证；请核对名称、地址及分享对象，不要把地图视角或路线当作地点。',
+                ),
                 if (widget.original != null)
                   const Text('更换后旧坐标保留为历史信息，不再用于新地点导航。取消不改变原关联。'),
               ],

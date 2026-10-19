@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -246,7 +244,7 @@ void main() {
           body: Builder(
             builder: (c) => ListView(
               children: [
-                TripMap(nodes: const [], onItem: (_) {}),
+                LocationCards(nodes: const [], onItem: (_) {}),
                 TextButton(
                   onPressed: () => navigatePlace(c, s, itemData('t', '东京')),
                   child: const Text('打开导航'),
@@ -266,113 +264,4 @@ void main() {
     await t.pumpWidget(const SizedBox());
     s.dispose();
   });
-  test('explicit searches cache, serialize and handle HTTP failure', () async {
-    final s = Store(':memory:');
-    addTearDown(s.dispose);
-    final fake = _Network();
-    await HttpOverrides.runZoned(() async {
-      final service = PlaceSearch(s);
-      final first = await service.search('Tokyo Station');
-      expect(first.single['id'], 'node/123');
-      expect(await service.search('Tokyo Station'), first);
-      expect(fake.client.requests.length, 1);
-      await service.search('Eiffel Tower');
-      expect(
-        fake.client.times[1].difference(fake.client.times[0]).inMilliseconds,
-        greaterThanOrEqualTo(1000),
-      );
-      fake.client.status = 429;
-      await expectLater(
-        service.search('Beijing Airport'),
-        throwsFormatException,
-      );
-      await expectLater(service.search('Another'), throwsFormatException);
-      expect(fake.client.requests, hasLength(3));
-      expect(fake.client.agent, contains('github.com/K1TAproject/HowDoI'));
-    }, createHttpClient: (_) => fake.client);
-  });
-}
-
-class _Network {
-  final client = _Client();
-}
-
-class _Client implements HttpClient {
-  final requests = <Uri>[], times = <DateTime>[];
-  int status = 200;
-  String? agent;
-  @override
-  Future<HttpClientRequest> getUrl(Uri uri) async {
-    requests.add(uri);
-    times.add(DateTime.now());
-    return _Request(this);
-  }
-
-  @override
-  void close({bool force = false}) {}
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
-
-class _Headers implements HttpHeaders {
-  final _Client client;
-  _Headers(this.client);
-  @override
-  void set(String name, Object value, {bool preserveHeaderCase = false}) {
-    if (name == HttpHeaders.userAgentHeader) client.agent = value.toString();
-  }
-
-  @override
-  String? value(String name) => null;
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
-
-class _Request implements HttpClientRequest {
-  final _Client client;
-  _Request(this.client);
-  @override
-  HttpHeaders get headers => _Headers(client);
-  @override
-  Future<HttpClientResponse> close() async => _Response(client);
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
-
-class _Response extends Stream<List<int>> implements HttpClientResponse {
-  final _Client client;
-  _Response(this.client);
-  @override
-  int get statusCode => client.status;
-  @override
-  HttpHeaders get headers => _Headers(client);
-  @override
-  StreamSubscription<List<int>> listen(
-    void Function(List<int>)? onData, {
-    Function? onError,
-    void Function()? onDone,
-    bool? cancelOnError,
-  }) =>
-      Stream.value(
-        utf8.encode(
-          jsonEncode([
-            {
-              'name': 'Test',
-              'display_name': 'Test, Tokyo',
-              'lat': '35',
-              'lon': '139',
-              'osm_type': 'node',
-              'osm_id': 123,
-              'address': {'country_code': 'jp'},
-            },
-          ]),
-        ),
-      ).listen(
-        onData,
-        onError: onError,
-        onDone: onDone,
-        cancelOnError: cancelOnError,
-      );
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

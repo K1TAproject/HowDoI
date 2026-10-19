@@ -456,7 +456,7 @@ class Store extends ChangeNotifier {
       ))
         'mapAttribution':
             '© OpenStreetMap contributors, ODbL; https://www.openstreetmap.org/copyright',
-      'version': 4,
+      'version': 5,
       'records': rows
           .where((r) => trip == null || r.id == trip || r.data['trip'] == trip)
           .map((r) => r.toJson())

@@ -1,3 +1,4 @@
+import 'map_links.dart';
 import 'external_binding.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -795,7 +796,7 @@ class ItemEditorState extends State<ItemEditor> {
                                 Text(
                                   p == null
                                       ? '尚未关联地点'
-                                      : '${Theme.of(context).platform == TargetPlatform.android ? '${p['provider']} · ' : ''}${p['name']} · ${p['address']}',
+                                      : '${mapProviderName(p['provider'])} · ${p['name']} · ${p['address']}',
                                 ),
                                 if (placeStale(d, slot))
                                   Text(
@@ -810,52 +811,10 @@ class ItemEditorState extends State<ItemEditor> {
                                   spacing: 8,
                                   children: [
                                     FilledButton.tonal(
-                                      onPressed: () async {
-                                        if (Theme.of(context).platform ==
-                                            TargetPlatform.android) {
-                                          await bindExternal(slot);
-                                          return;
-                                        }
-                                        final picked = await choosePlace(
-                                          context,
-                                          widget.store,
-                                          placeText(d, slot),
-                                          linkedPlace(d, slot),
-                                        );
-                                        if (picked != null && mounted) {
-                                          setState(() {
-                                            draft['locations'] = {
-                                              ...?draft['locations'] as Map?,
-                                              slot: picked,
-                                            };
-                                          });
-                                        }
-                                      },
+                                      onPressed: () => bindExternal(slot),
                                       child: Text(
                                         p == null
-                                            ? (slot == 'origin'
-                                                  ? (Theme.of(
-                                                              context,
-                                                            ).platform ==
-                                                            TargetPlatform
-                                                                .android
-                                                        ? '绑定起点'
-                                                        : '设置起点')
-                                                  : slot == 'destination'
-                                                  ? (Theme.of(
-                                                              context,
-                                                            ).platform ==
-                                                            TargetPlatform
-                                                                .android
-                                                        ? '绑定终点'
-                                                        : '设置终点')
-                                                  : (Theme.of(
-                                                              context,
-                                                            ).platform ==
-                                                            TargetPlatform
-                                                                .android
-                                                        ? '绑定地点'
-                                                        : '设置地点'))
+                                            ? '绑定${placeSlotLabel(slot)}'
                                             : '更换 / 核对',
                                       ),
                                     ),

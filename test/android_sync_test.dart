@@ -154,6 +154,15 @@ void main() {
       trip = a.get(trip.id)!;
       final hotel = a.save('item', {
         ...itemData(trip.id, '旅馆', type: '住宿'),
+        'locations': {
+          'place': {
+            'url': 'https://surl.amap.com/zjlG58usfdy',
+            'provider': 'amap',
+            'name': '旅馆',
+            'address': '测试地址',
+            'sourceText': '旅馆',
+          },
+        },
         'costs': [
           {
             'id': 'c',
@@ -187,6 +196,7 @@ void main() {
       expect(b.setting('sync.peer'), isNull);
       await client.pair(jsonEncode(pairing));
       expect(client.status, startsWith('已同步'));
+      expect(b.get(hotel.id)!.data['locations'], hotel.data['locations']);
       // The real HTTPS endpoint rejects protocol and clock mismatches before merging.
       for (final envelope in [
         {
@@ -232,10 +242,26 @@ void main() {
       expect(b.export(), isNot(contains(pairing['fingerprint'])));
       client.active = false;
       a.save('item', {...hotel.data, 'note': '电脑离线'}, id: hotel.id);
-      b.save('item', {...flight.data, 'note': '手机离线'}, id: flight.id);
+      b.save('item', {
+        ...flight.data,
+        'note': '手机离线',
+        'locations': {
+          'destination': {
+            'url': 'https://maps.app.goo.gl/ytAHMqwsXXqTCoky5',
+            'provider': 'google',
+            'name': '目的地',
+            'address': '',
+            'sourceText': '',
+          },
+        },
+      }, id: flight.id);
       client.active = true;
       await client.tick();
       expect(a.get(flight.id)!.data['note'], '手机离线');
+      expect(
+        a.get(flight.id)!.data['locations'],
+        b.get(flight.id)!.data['locations'],
+      );
       expect(b.get(hotel.id)!.data['note'], '电脑离线');
       // Whole-trip LWW also includes the preparation list.
       a.savePreparations(a.get(trip.id)!, [
@@ -268,6 +294,7 @@ void main() {
       client = SyncService(b, host: false);
       await client.restore();
       expect(client.status, startsWith('已同步'));
+      expect(b.get(hotel.id)!.data['locations'], hotel.data['locations']);
       expect(client.lastSuccess, isNotNull);
       expect(b.items(trip.id).single.id, hotel.id);
       // Saved modifications trigger a real bidirectional sync automatically.

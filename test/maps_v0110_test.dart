@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:howdoi/maps.dart';
 import 'package:howdoi/places.dart';
@@ -18,9 +16,6 @@ import 'maps_test.dart' show place;
 void main() {
   setUpAll(() {
     tz.initializeTimeZones();
-    BuiltInMapCachingProvider.getOrCreateInstance(
-      cacheDirectory: Directory('work/maps-widget-cache').absolute.path,
-    );
   });
   test('navigation targets follow cross-day and lodging references', () {
     final s = Store(':memory:');
@@ -53,67 +48,6 @@ void main() {
       hasLength(1),
     );
   });
-  testWidgets(
-    'daily map has no lines, overlapping visits stay accessible; empty is compact',
-    (t) async {
-      final s = Store(':memory:');
-      final trip = s.save('trip', tripData());
-      final a = s.save('item', {
-        ...itemData(trip.id, '第一站'),
-        'locations': {'place': place('第一站')},
-      });
-      final b = s.save('item', {
-        ...itemData(trip.id, '第二站'),
-        'locations': {'place': place('第二站')},
-      });
-      String? opened;
-      for (final width in [1100.0, 390.0]) {
-        t.view.physicalSize = Size(width, 844);
-        t.view.devicePixelRatio = 1;
-        await t.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: ListView(
-                children: [
-                  TripMap(
-                    nodes: planNodes([a, b]),
-                    daily: true,
-                    onItem: (r) => opened = r.id,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-        await t.pump(const Duration(milliseconds: 200));
-        final map = t.widget<PlaceMap>(find.byType(PlaceMap));
-        expect(map.connections, isEmpty);
-        expect(map.points, hasLength(2));
-        map.onPoint!(1);
-        await t.pumpAndSettle();
-        expect(find.text('1. 第一站'), findsOneWidget);
-        expect(find.text('2. 第二站'), findsOneWidget);
-        await t.tap(find.text('1. 第一站'));
-        await t.pumpAndSettle();
-        expect(opened, a.id);
-        expect(t.takeException(), isNull);
-        await t.pumpWidget(const SizedBox());
-      }
-      t.view.resetPhysicalSize();
-      t.view.resetDevicePixelRatio();
-      await t.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: TripMap(nodes: [], daily: true, onItem: (_) {}),
-          ),
-        ),
-      );
-      expect(find.byType(PlaceMap), findsNothing);
-      expect(find.textContaining('尚无已确认位置'), findsOneWidget);
-      await t.pumpWidget(const SizedBox());
-      s.dispose();
-    },
-  );
   testWidgets(
     'platform entrypoints: Windows inline day map; Android cards and overview no maps',
     (t) async {
@@ -155,7 +89,7 @@ void main() {
       );
       await t.pumpAndSettle();
       expect(find.text('查看旅行地图'), findsNothing);
-      expect(find.byType(PlaceMap), findsNothing);
+      expect(find.text('选择地点'), findsNothing);
       expect(find.byType(NavigationActions), findsOneWidget);
       await t.pumpWidget(const SizedBox());
       sync.dispose();
@@ -189,6 +123,7 @@ void main() {
       final draft = {...r.data};
       await t.pumpWidget(
         MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.windows),
           home: Scaffold(
             body: Builder(
               builder: (c) => TextButton(
@@ -207,13 +142,13 @@ void main() {
       s.setSetting('mapProvider:overseas', 'baidu');
       await t.tap(find.text('go'));
       await t.pumpAndSettle();
-      expect(urls.last.scheme, 'baidumap');
-      expect(urls.last.queryParameters['coord_type'], 'wgs84');
+      expect(urls.last.scheme, 'https');
+      expect(urls.last.host, 'api.map.baidu.com');
       draft['name'] = '京都';
       await t.tap(find.text('go'));
       await t.pumpAndSettle();
-      expect(urls.last.path, '/geocoder');
-      expect(urls.last.queryParameters['address'], '京都');
+      expect(urls.last.path, '/place/search');
+      expect(urls.last.queryParameters['query'], '京都');
       expect(s.get(r.id)!.data['name'], '东京');
       success = false;
       await t.tap(find.text('go'));
@@ -256,7 +191,7 @@ void main() {
     await t.ensureVisible(find.text('地图地点（可选）'));
     await t.pumpAndSettle();
     expect(find.text('更换 / 核对'), findsOneWidget);
-    expect(find.byType(PlaceMap), findsNothing);
+    expect(find.text('选择地点'), findsNothing);
     await t.ensureVisible(find.text('解除关联'));
     await t.tap(find.text('解除关联'));
     await t.pumpAndSettle();

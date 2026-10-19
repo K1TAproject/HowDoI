@@ -51,10 +51,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    store.db.execute(
+      "DELETE FROM settings WHERE key LIKE 'mapSearch:%' OR key = 'mapSearchEndpoint'",
+    );
     if (Platform.isAndroid) {
-      store.db.execute(
-        "DELETE FROM settings WHERE key LIKE 'mapSearch:%' OR key = 'mapSearchEndpoint'",
-      );
       MapShareInbox.instance.addListener(changed);
       MapShareInbox.instance.start();
     }
@@ -1040,7 +1040,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                     initiallyExpanded: true,
                     title: const Text('当天地点'),
                     children: [
-                      TripMap(
+                      LocationCards(
                         nodes: [...rows, ...stays],
                         daily: true,
                         onItem: (r) => openEditor(trip, r, wide),
