@@ -391,7 +391,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     }
   }
 
-  Widget activeEditor(Record trip) => editingPreparation
+  Widget activeEditor(Record trip, {bool embeddedBinding = false}) =>
+      editingPreparation
       ? PreparationEditor(
           key: preparationKey,
           store: store,
@@ -401,6 +402,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         )
       : ItemEditor(
           key: editorKey,
+          embeddedBinding: embeddedBinding,
           store: store,
           trip: trip,
           day: day,
@@ -1306,7 +1308,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                             color: Theme.of(
                               context,
                             ).colorScheme.surfaceContainerLow,
-                            child: activeEditor(trip),
+                            child: activeEditor(trip, embeddedBinding: true),
                           ),
                         ),
                       ],

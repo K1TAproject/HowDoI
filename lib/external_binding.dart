@@ -20,6 +20,7 @@ class ExternalBindingPage extends StatefulWidget {
   final String tripId, target, slot, sourceText;
   final String? itemId;
   final Map<String, dynamic>? original;
+  final ValueChanged<Map<String, dynamic>?>? onFinished;
   const ExternalBindingPage({
     super.key,
     required this.store,
@@ -29,6 +30,7 @@ class ExternalBindingPage extends StatefulWidget {
     required this.sourceText,
     this.itemId,
     this.original,
+    this.onFinished,
   });
   @override
   State<ExternalBindingPage> createState() => _ExternalBindingPageState();
@@ -87,7 +89,15 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
     super.dispose();
   }
 
-  Future<void> search({bool web = false}) async {
+  void finish(Map<String, dynamic>? result) {
+    if (widget.onFinished != null) {
+      widget.onFinished!(result);
+    } else {
+      Navigator.pop(context, result);
+    }
+  }
+
+  Future<void> search({bool web = false, bool copy = false}) async {
     if (region == null || query.text.trim().isEmpty) {
       setState(() => error = '请填写地点名称，并选择地点所在地区。');
       return;
@@ -95,6 +105,19 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
     final provider =
         widget.store.setting('mapProvider:$region') ??
         (region == 'domestic' ? 'baidu' : 'google');
+    if (copy) {
+      await Clipboard.setData(
+        ClipboardData(
+          text: mapSearchUri(
+            provider,
+            query.text.trim(),
+            area.text.trim(),
+          ).toString(),
+        ),
+      );
+      if (mounted) setState(() => error = '已复制搜索网址。可在已有标签页地址栏粘贴后搜索；未打开或控制浏览器。');
+      return;
+    }
     widget.store.setSetting('mapRegion', region!);
     widget.store.setSetting(
       'pendingMapBinding',
@@ -132,7 +155,10 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text('绑定${placeSlotLabel(widget.slot)}')),
+    appBar: AppBar(
+      leading: BackButton(onPressed: () => finish(null)),
+      title: Text('绑定${placeSlotLabel(widget.slot)}'),
+    ),
     body: SafeArea(
       child: Column(
         children: [
@@ -191,6 +217,12 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                       onPressed: launching ? null : () => search(),
                       child: Text(windows ? '打开地图网页搜索' : '打开地图搜索'),
                     ),
+                    if (windows)
+                      TextButton.icon(
+                        onPressed: launching ? null : () => search(copy: true),
+                        icon: const Icon(Icons.copy),
+                        label: const Text('复制搜索网址'),
+                      ),
                     if (!windows)
                       TextButton(
                         onPressed: launching ? null : () => search(web: true),
@@ -198,6 +230,10 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                       ),
                   ],
                 ),
+                if (windows)
+                  const Text(
+                    '默认浏览器接口不支持指定或跟踪标签页，打开搜索可能新增标签页。可复制搜索网址，在已有标签页手动搜索。',
+                  ),
                 TextField(
                   controller: shared,
                   maxLines: 3,
@@ -272,7 +308,7 @@ class _ExternalBindingPageState extends State<ExternalBindingPage> {
                       };
                       await MapShareInbox.instance.acknowledge(shareId);
                       widget.store.setSetting('pendingMapBinding', '');
-                      if (context.mounted) Navigator.pop(context, result);
+                      if (context.mounted) finish(result);
                     },
               child: const Text('确认绑定到当前草稿'),
             ),

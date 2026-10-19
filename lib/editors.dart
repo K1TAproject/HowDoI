@@ -250,6 +250,7 @@ class ItemEditor extends StatefulWidget {
   final int day;
   final VoidCallback onClose;
   final String? bindingSlot;
+  final bool embeddedBinding;
   const ItemEditor({
     super.key,
     required this.store,
@@ -258,32 +259,48 @@ class ItemEditor extends StatefulWidget {
     required this.onClose,
     this.item,
     this.bindingSlot,
+    this.embeddedBinding = false,
   });
   @override
   State<ItemEditor> createState() => ItemEditorState();
 }
 
 class ItemEditorState extends State<ItemEditor> {
-  Future<void> bindExternal(String slot) async {
+  String? activeBindingSlot;
+
+  ExternalBindingPage bindingPage(String slot, {bool embedded = false}) {
     final d = value();
+    return ExternalBindingPage(
+      store: widget.store,
+      tripId: widget.trip.id,
+      itemId: savedId,
+      target:
+          '${widget.trip.data['name']} / ${d['name'] == '' ? d['type'] : d['name']}',
+      slot: slot,
+      sourceText: placeText(d, slot),
+      original: locationBinding(d, slot),
+      onFinished: embedded
+          ? (picked) {
+              setState(() {
+                if (picked != null) setBinding(draft, slot, picked);
+                activeBindingSlot = null;
+              });
+            }
+          : null,
+    );
+  }
+
+  Future<void> bindExternal(String slot) async {
+    if (widget.embeddedBinding &&
+        Theme.of(context).platform == TargetPlatform.windows) {
+      setState(() => activeBindingSlot = slot);
+      return;
+    }
     final picked = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) => ExternalBindingPage(
-          store: widget.store,
-          tripId: widget.trip.id,
-          itemId: savedId,
-          target:
-              '${widget.trip.data['name']} / ${d['name'] == '' ? d['type'] : d['name']}',
-          slot: slot,
-          sourceText: placeText(d, slot),
-          original: locationBinding(d, slot),
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => bindingPage(slot)),
     );
     if (picked != null && mounted) {
-      setState(() {
-        setBinding(draft, slot, picked);
-      });
+      setState(() => setBinding(draft, slot, picked));
     }
   }
 
@@ -737,6 +754,10 @@ class ItemEditorState extends State<ItemEditor> {
   }
 
   Future<bool> mayLeave() async {
+    if (activeBindingSlot != null) {
+      setState(() => activeBindingSlot = null);
+      return false;
+    }
     if (pickerKey.currentState?.dismissIfOpen() ?? false) return false;
     if (initialValue == jsonEncode(value())) return true;
     final answer = await showDialog<String>(
@@ -974,7 +995,7 @@ class ItemEditorState extends State<ItemEditor> {
         .items(widget.trip.id)
         .where((r) => r.id != widget.item?.id && !isTransport(r.data['type']))
         .toList();
-    return Column(
+    final editor = Column(
       children: [
         Padding(
           padding: const EdgeInsets.all(16),
@@ -1160,6 +1181,21 @@ class ItemEditorState extends State<ItemEditor> {
             ],
           ),
         ),
+      ],
+    );
+    return Stack(
+      children: [
+        ExcludeFocus(
+          excluding: activeBindingSlot != null,
+          child: ExcludeSemantics(
+            excluding: activeBindingSlot != null,
+            child: editor,
+          ),
+        ),
+        if (activeBindingSlot != null)
+          Positioned.fill(
+            child: bindingPage(activeBindingSlot!, embedded: true),
+          ),
       ],
     );
   }
