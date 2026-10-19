@@ -107,9 +107,53 @@ bool reuseBlocked(Map<String, dynamic> d, String slot) =>
           true)
     : (d['noReuse'] as Map?)?[slot] == true;
 
+// Only current positions are used; previousPosition is deliberately never read.
+Map<String, dynamic>? currentPosition(Map<String, dynamic>? binding) {
+  if (binding == null) return null;
+  final p = binding['position'] ?? (binding['url'] == null ? binding : null);
+  if (p is! Map ||
+      p['crs'] != 'WGS84' ||
+      p['lat'] is! num ||
+      p['lon'] is! num ||
+      !(p['lat'] as num).isFinite ||
+      !(p['lon'] as num).isFinite ||
+      p['lat'] < -90 ||
+      p['lat'] > 90 ||
+      p['lon'] < -180 ||
+      p['lon'] > 180 ||
+      (binding['position'] != null && p['confirmed'] != true)) {
+    return null;
+  }
+  return Map<String, dynamic>.from(p);
+}
+
+Map<String, dynamic>? parsePosition(String text) {
+  if (text.trim().isEmpty) return null;
+  final parts = text.trim().split(RegExp('[,，]'));
+  if (parts.length != 2) throw const FormatException('请按“纬度，经度”填写两个数值');
+  final lat = double.tryParse(parts[0].trim()),
+      lon = double.tryParse(parts[1].trim());
+  if (lat == null || lon == null || !lat.isFinite || !lon.isFinite) {
+    throw const FormatException('纬度和经度必须是有限数值');
+  }
+  if (lat < -90 || lat > 90) {
+    throw const FormatException('纬度必须在 -90～90 之间，不会自动交换顺序');
+  }
+  if (lon < -180 || lon > 180) throw const FormatException('经度必须在 -180～180 之间');
+  return {
+    'lat': lat,
+    'lon': lon,
+    'crs': 'WGS84',
+    'source': 'google-manual',
+    'confirmed': true,
+  };
+}
+
 Map<String, dynamic>? linkedPlace(Map<String, dynamic> d, String slot) {
   final p = locationBinding(d, slot);
-  return p == null || p.containsKey('url') ? null : p;
+  if (p == null || p.containsKey('url')) return null;
+  final position = currentPosition(p);
+  return position == null ? null : {...p, ...position};
 }
 
 bool placeStale(Map<String, dynamic> d, String slot) =>
@@ -237,8 +281,8 @@ Uri navigationUri(
 }
 
 String bindingIdentity(Map<String, dynamic> p) => p['url'] is String
-    ? '${p['provider']}:${p['url']}'
-    : '${p['provider']}:${p['crs']}:${p['lat']}:${p['lon']}';
+    ? '${p['provider']}:${p['url']}:${jsonEncode(p['position'])}'
+    : '${p['provider']}:${jsonEncode(currentPosition(p))}';
 Map<String, List<Map<String, dynamic>>> reusableBindings(
   Iterable<Map<String, dynamic>> records,
 ) {

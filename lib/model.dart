@@ -315,8 +315,8 @@ List<Record> decodeRecords(String text, {String format = 'howdoi-backup'}) {
   if (m is! Map ||
       m['format'] != format ||
       (format == 'howdoi-sync'
-          ? m['version'] != 6
-          : ![1, 2, 3, 4, 5, 6].contains(m['version'])) ||
+          ? m['version'] != 7
+          : ![1, 2, 3, 4, 5, 6, 7].contains(m['version'])) ||
       m['records'] is! List ||
       m['records'].length > 20000) {
     throw const FormatException('不是受支持的 HowDoI 数据文件');
@@ -360,6 +360,39 @@ void validateLocations(dynamic locations) {
   }
   for (final e in locations.entries) {
     final p = e.value;
+    if (p is Map && p['position'] != null) {
+      final q = p['position'];
+      if (q is! Map ||
+          q['lat'] is! num ||
+          q['lon'] is! num ||
+          !(q['lat'] as num).isFinite ||
+          !(q['lon'] as num).isFinite ||
+          q['lat'] < -90 ||
+          q['lat'] > 90 ||
+          q['lon'] < -180 ||
+          q['lon'] > 180 ||
+          q['crs'] != 'WGS84' ||
+          q['source'] is! String ||
+          !['google-manual', 'osm', 'manual'].contains(q['source']) ||
+          q['confirmed'] != true) {
+        throw const FormatException('当前地点坐标无效，请核对 WGS84 纬度、经度及来源');
+      }
+      if (!p.containsKey('url')) {
+        if (!['manual', 'osm'].contains(p['provider'])) {
+          throw const FormatException('坐标来源无效');
+        }
+        validateLocations({
+          e.key: {
+            ...p,
+            ...q,
+            'provider': 'manual',
+            'id': p['id'] ?? '',
+            'country': p['country'] ?? '',
+          }..remove('position'),
+        });
+        continue;
+      }
+    }
     if (p is Map && p.containsKey('url')) {
       if (!['origin', 'destination', 'place'].contains(e.key) ||
           p['url'] is! String ||

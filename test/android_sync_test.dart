@@ -185,6 +185,13 @@ void main() {
               'sourceText': '公园',
               'provider': 'google',
               'url': 'https://maps.app.goo.gl/ytAHMqwsXXqTCoky5',
+              'position': {
+                'lat': 40.828178925867995,
+                'lon': 140.6934585811546,
+                'crs': 'WGS84',
+                'source': 'google-manual',
+                'confirmed': true,
+              },
             },
           },
           {'id': 'p2', 'name': '神宫'},

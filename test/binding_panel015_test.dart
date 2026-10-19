@@ -204,9 +204,12 @@ void main() {
         ),
       );
       await t.pumpAndSettle();
+      await t.tap(find.text('去地图搜索'));
+      await t.pumpAndSettle();
       for (final provider in ['google', 'baidu', 'amap']) {
         s.setSetting('mapProvider:overseas', provider);
         await t.ensureVisible(find.text('复制搜索网址'));
+        await t.pumpAndSettle();
         await t.tap(find.text('复制搜索网址'));
         await t.pumpAndSettle();
         expect(copied, mapSearchUri(provider, '酒店', '').toString());

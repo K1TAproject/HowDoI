@@ -1,3 +1,4 @@
+import 'day_map.dart';
 import 'places.dart';
 import 'external_binding.dart';
 import 'share_inbox.dart';
@@ -1035,6 +1036,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             header: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                DayMap(
+                  key: ValueKey('map:${trip.id}:$day'),
+                  nodes: [...rows, ...stays],
+                  onItem: (r) => openEditor(trip, r, wide),
+                ),
                 UnboundPlaces(
                   nodes: [...rows, ...stays],
                   onItem: (r) => openEditor(trip, r, wide),

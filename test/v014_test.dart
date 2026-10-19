@@ -60,7 +60,7 @@ void main() {
         final copy = Store(':memory:');
         copy.importCopy(
           decodeRecords(
-            store.export().replaceFirst('"version":6', '"version":$version'),
+            store.export().replaceFirst('"version":7', '"version":$version'),
           ),
         );
         expect(

@@ -150,6 +150,10 @@ void main() {
       expect(t.getBottomLeft(find.text('确认绑定到当前草稿')).dy, lessThan(544));
       t.view.resetViewInsets();
       await t.pump();
+      await t.ensureVisible(find.text('清除坐标'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('清除坐标'));
+      await t.pump();
       await t.tap(find.text('确认绑定到当前草稿'));
       await t.pumpAndSettle();
       expect(
