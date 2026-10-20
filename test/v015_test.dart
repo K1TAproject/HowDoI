@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -84,7 +85,11 @@ void main() {
     },
   );
   test('full version remains available for update checks', () async {
-    expect(await appVersion(), '0.1.16+17');
+    final expected = RegExp(
+      r'^version:\s*(\S+)',
+      multiLine: true,
+    ).firstMatch(File('pubspec.yaml').readAsStringSync())!.group(1);
+    expect(await appVersion(), expected);
   });
 
   for (final width in [1440.0, 700.0]) {

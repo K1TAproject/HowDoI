@@ -327,10 +327,39 @@ class PlaceReusePlan {
     }
     void fill(Map<String, dynamic> d, String label) {
       for (final slot in placeSlots(d)) {
-        if (locationBinding(d, slot) != null || reuseBlocked(d, slot)) continue;
+        if (reuseBlocked(d, slot) || placeStale(d, slot)) continue;
         final name = placeText(d, slot), found = candidates[name] ?? [];
-        if (found.length != 1 || uncertain.contains(name)) continue;
-        setBinding(d, slot, {...found.single, 'sourceText': name});
+        if (uncertain.contains(name)) continue;
+        final existing = locationBinding(d, slot);
+        // An identical URL without coordinates is not a competing location.
+        final identities = found
+            .map((p) => '${p['provider']}:${p['url']}')
+            .toSet();
+        final positioned = found
+            .where((p) => currentPosition(p) != null)
+            .toList();
+        final positions = positioned
+            .map((p) => jsonEncode(currentPosition(p)))
+            .toSet();
+        if (existing != null) {
+          if (currentPosition(existing) != null ||
+              identities.length != 1 ||
+              positions.length != 1) {
+            continue;
+          }
+          setBinding(d, slot, {
+            ...existing,
+            'position': currentPosition(positioned.first),
+          });
+        } else {
+          if (found.isEmpty || identities.length != 1 || positions.length > 1) {
+            continue;
+          }
+          setBinding(d, slot, {
+            ...(positioned.isNotEmpty ? positioned.first : found.first),
+            'sourceText': name,
+          });
+        }
         count++;
         affected.add('$label · $name');
       }

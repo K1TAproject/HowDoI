@@ -268,6 +268,13 @@ class ItemEditor extends StatefulWidget {
 class ItemEditorState extends State<ItemEditor> {
   String? activeBindingSlot;
 
+  void acceptBinding(String slot, Map<String, dynamic> picked) {
+    final clearedPosition =
+        currentPosition(locationBinding(value(), slot)) != null &&
+        currentPosition(picked) == null;
+    setBinding(draft, slot, picked, blockReuse: clearedPosition);
+  }
+
   ExternalBindingPage bindingPage(String slot, {bool embedded = false}) {
     final d = value();
     return ExternalBindingPage(
@@ -282,7 +289,7 @@ class ItemEditorState extends State<ItemEditor> {
       onFinished: embedded
           ? (picked) {
               setState(() {
-                if (picked != null) setBinding(draft, slot, picked);
+                if (picked != null) acceptBinding(slot, picked);
                 activeBindingSlot = null;
               });
             }
@@ -300,7 +307,7 @@ class ItemEditorState extends State<ItemEditor> {
       MaterialPageRoute(builder: (_) => bindingPage(slot)),
     );
     if (picked != null && mounted) {
-      setState(() => setBinding(draft, slot, picked));
+      setState(() => acceptBinding(slot, picked));
     }
   }
 
@@ -333,7 +340,7 @@ class ItemEditorState extends State<ItemEditor> {
               title: Text('自动复用 ${plan.count} 个地点绑定'),
               content: SingleChildScrollView(
                 child: Text(
-                  '仅补齐同旅行内同名且唯一的绑定，不替换已有绑定。\n${plan.affected.join('\n')}\n确认后与当前行程一起保存；取消不修改任何记录。',
+                  '仅补齐同旅行内同名且唯一的绑定或缺少的坐标，不替换已有链接与坐标。\n${plan.affected.join('\n')}\n确认后与当前行程一起保存；取消不修改任何记录。',
                 ),
               ),
               actions: [

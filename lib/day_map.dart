@@ -44,11 +44,15 @@ class DayMap extends StatefulWidget {
   final List<PlanNode> nodes;
   final ValueChanged<Record> onItem;
   final TileProvider? tileProvider;
+  final bool fillWindow;
+  final VoidCallback? onExpand;
   const DayMap({
     super.key,
     required this.nodes,
     required this.onItem,
     this.tileProvider,
+    this.fillWindow = false,
+    this.onExpand,
   });
   @override
   State<DayMap> createState() => _DayMapState();
@@ -208,11 +212,22 @@ class _DayMapState extends State<DayMap> {
     if (chosen != null && mounted) widget.onItem(chosen);
   }
 
+  Widget mapArea(BuildContext context, Widget child) => widget.fillWindow
+      ? Expanded(child: child)
+      : SizedBox(
+          height: MediaQuery.sizeOf(context).width < 600 ? 230 : 280,
+          child: child,
+        );
+
   @override
   Widget build(BuildContext context) {
     final all = visits, shown = points;
     final attempt = revision;
-    if (all.isEmpty) return const SizedBox.shrink();
+    if (all.isEmpty) {
+      return widget.fillWindow
+          ? const Center(child: Text('当天没有可显示的地点'))
+          : const SizedBox.shrink();
+    }
     final groups = <String, List<DayPoint>>{};
     for (final p in shown) {
       groups
@@ -228,7 +243,7 @@ class _DayMapState extends State<DayMap> {
         Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (shown.isNotEmpty)
+            if (shown.isNotEmpty && !widget.fillWindow)
               TextButton.icon(
                 onPressed: () => setState(() {
                   expanded = !expanded;
@@ -243,6 +258,12 @@ class _DayMapState extends State<DayMap> {
                 icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
                 label: const Text('当天地图'),
               ),
+            if (widget.onExpand != null)
+              TextButton.icon(
+                onPressed: widget.onExpand,
+                icon: const Icon(Icons.open_in_full),
+                label: const Text('展开地图'),
+              ),
             Padding(
               padding: const EdgeInsets.all(8),
               child: Text('已显示 ${shown.length}/${all.length} 个地点'),
@@ -252,9 +273,9 @@ class _DayMapState extends State<DayMap> {
           ],
         ),
         if (shown.isNotEmpty && expanded) ...[
-          SizedBox(
-            height: MediaQuery.sizeOf(context).width < 600 ? 230 : 280,
-            child: failed
+          mapArea(
+            context,
+            failed
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

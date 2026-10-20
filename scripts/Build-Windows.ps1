@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
 & "$PSScriptRoot/Write-ReleaseNotes.ps1" -CheckOnly
@@ -18,6 +18,10 @@ if (Test-Path -LiteralPath $vswhere) {
     if ($crt) { Get-ChildItem -LiteralPath $crt -Filter '*.dll' | Copy-Item -Destination $releaseDir -Force }
   }
 }
+# Remove the stale build-only manifest left by older Flutter builds.
+$buildManifest = Join-Path $releaseDir 'native_assets.json'
+if (Test-Path -LiteralPath $buildManifest) { Remove-Item -LiteralPath $buildManifest }
+& "$PSScriptRoot/Assert-WindowsPayload.ps1" -ReleaseDir $releaseDir
 $package = "dist/HowDoI-$version-windows-x64.zip"
 Compress-Archive -Path "$releaseDir/*" -DestinationPath $package -Force
 $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()

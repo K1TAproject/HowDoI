@@ -1,3 +1,4 @@
+import 'package:howdoi/updates.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -133,7 +134,10 @@ void main() {
       expect(store.items(trip.id).single.data['day'], 2);
       await tester.tap(find.byTooltip('关于 / 检查更新'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('当前版本：v0.1.16'), findsOneWidget);
+      expect(
+        find.textContaining('当前版本：v${(await appVersion()).split('+').first}'),
+        findsOneWidget,
+      );
       expect(
         Theme.of(tester.element(find.text('检查更新'))).brightness,
         Brightness.dark,

@@ -1,4 +1,4 @@
-param([switch]$SkipBuild)
+﻿param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
@@ -15,6 +15,7 @@ if (!$SkipBuild) {
   if ($LASTEXITCODE -ne 0) { throw 'Windows 构建失败' }
 }
 $releaseDir = Join-Path $projectRoot 'build/windows/x64/runner/Release'
+& "$PSScriptRoot/Assert-WindowsPayload.ps1" -ReleaseDir $releaseDir
 $exe = Join-Path $releaseDir 'howdoi.exe'
 if (!(Test-Path -LiteralPath $exe) -or (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -ne $fullVersion) { throw 'Windows EXE 缺失或版本不符，请重新构建' }
 New-Item -ItemType Directory -Path work/installer,dist -Force | Out-Null

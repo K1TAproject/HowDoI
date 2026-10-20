@@ -34,6 +34,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   bool editing = false;
   bool preparing = false, editingPreparation = false;
   bool overview = false;
+  bool expandedMap = false;
+  bool? mapLayoutWide;
   GlobalKey<PreparationEditorState> preparationKey =
       GlobalKey<PreparationEditorState>();
   final preparationListKey = GlobalKey<PreparationListState>();
@@ -1038,6 +1040,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               children: [
                 DayMap(
                   key: ValueKey('map:${trip.id}:$day'),
+                  onExpand: Theme.of(context).platform == TargetPlatform.windows
+                      ? () => setState(() {
+                          expandedMap = true;
+                          mapLayoutWide = wide;
+                        })
+                      : null,
                   nodes: [...rows, ...stays],
                   onItem: (r) => openEditor(trip, r, wide),
                 ),
@@ -1124,7 +1132,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     }
     return LayoutBuilder(
       builder: (context, size) {
-        final wide = size.maxWidth >= 1100;
+        final wide = expandedMap ? mapLayoutWide! : size.maxWidth >= 1100;
         final sidebar = size.maxWidth >= 800;
         return PopScope(
           canPop: Theme.of(context).platform != TargetPlatform.android,
@@ -1195,136 +1203,197 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             drawer: sidebar
                 ? null
                 : Drawer(child: SafeArea(child: navigation(trip))),
-            body: Column(
+            body: Stack(
+              fit: StackFit.expand,
               children: [
-                Material(
-                  color: Theme.of(context).colorScheme.surfaceContainerLow,
-                  child: InkWell(
-                    onTap: () => showSyncDialog(context, widget.sync),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            widget.sync.enabled
-                                ? Icons.wifi
-                                : Icons.offline_bolt_outlined,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              widget.sync.status,
-                              style: const TextStyle(fontSize: 12),
+                ExcludeFocus(
+                  excluding: expandedMap,
+                  child: Offstage(
+                    offstage: expandedMap,
+                    child: Column(
+                      children: [
+                        Material(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerLow,
+                          child: InkWell(
+                            onTap: () => showSyncDialog(context, widget.sync),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    widget.sync.enabled
+                                        ? Icons.wifi
+                                        : Icons.offline_bolt_outlined,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      widget.sync.status,
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                  const Text(
+                                    '离线可用 · 编辑后保存',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          const Text(
-                            '离线可用 · 编辑后保存',
-                            style: TextStyle(fontSize: 12),
+                        ),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (sidebar) ...[
+                                SizedBox(
+                                  width: 230,
+                                  child: Material(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerLow,
+                                    child: navigation(trip),
+                                  ),
+                                ),
+                                const VerticalDivider(width: 1),
+                              ],
+                              Expanded(
+                                child: trip == null
+                                    ? Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.explore_outlined,
+                                              size: 72,
+                                              color: Colors.blueGrey,
+                                            ),
+                                            const SizedBox(height: 20),
+                                            Text(
+                                              '每段旅程，从这里开始',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.headlineSmall,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            const Text('离线路书 · 自由编排 · 预算心中有数'),
+                                            const SizedBox(height: 24),
+                                            FilledButton.icon(
+                                              onPressed: () async {
+                                                if (await leaveEditor() &&
+                                                    context.mounted) {
+                                                  setState(
+                                                    () => editing = false,
+                                                  );
+                                                  await editTrip(
+                                                    context,
+                                                    store,
+                                                  );
+                                                }
+                                              },
+                                              icon: const Icon(Icons.add),
+                                              label: const Text('创建第一次旅行'),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : editing && !wide
+                                    ? activeEditor(trip)
+                                    : overview
+                                    ? TripOverview(
+                                        store: store,
+                                        trip: trip,
+                                        onDay: selectDay,
+                                        onItem: (item) =>
+                                            openEditor(trip, item, wide),
+                                      )
+                                    : preparing
+                                    ? PreparationList(
+                                        key: preparationListKey,
+                                        store: store,
+                                        trip: trip,
+                                        beforeChange: () async {
+                                          if (!await leaveEditor(
+                                                includeQuick: false,
+                                              ) ||
+                                              !mounted) {
+                                            return false;
+                                          }
+                                          setState(() => editing = false);
+                                          return true;
+                                        },
+                                        onEdit: (id) =>
+                                            openPreparation(trip, id, wide),
+                                      )
+                                    : itinerary(trip, wide),
+                              ),
+                              if (wide && trip != null && editing) ...[
+                                const VerticalDivider(width: 1),
+                                SizedBox(
+                                  width: 410,
+                                  child: Material(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerLow,
+                                    child: activeEditor(
+                                      trip,
+                                      embeddedBinding: true,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (sidebar) ...[
-                        SizedBox(
-                          width: 230,
-                          child: Material(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerLow,
-                            child: navigation(trip),
+                if (expandedMap && trip != null)
+                  Material(
+                    child: Column(
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () =>
+                                setState(() => expandedMap = false),
+                            icon: const Icon(Icons.arrow_back),
+                            label: const Text('返回行程'),
                           ),
                         ),
-                        const VerticalDivider(width: 1),
-                      ],
-                      Expanded(
-                        child: trip == null
-                            ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.explore_outlined,
-                                      size: 72,
-                                      color: Colors.blueGrey,
-                                    ),
-                                    const SizedBox(height: 20),
-                                    Text(
-                                      '每段旅程，从这里开始',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.headlineSmall,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    const Text('离线路书 · 自由编排 · 预算心中有数'),
-                                    const SizedBox(height: 24),
-                                    FilledButton.icon(
-                                      onPressed: () async {
-                                        if (await leaveEditor() &&
-                                            context.mounted) {
-                                          setState(() => editing = false);
-                                          await editTrip(context, store);
-                                        }
-                                      },
-                                      icon: const Icon(Icons.add),
-                                      label: const Text('创建第一次旅行'),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : editing && !wide
-                            ? activeEditor(trip)
-                            : overview
-                            ? TripOverview(
-                                store: store,
-                                trip: trip,
-                                onDay: selectDay,
-                                onItem: (item) => openEditor(trip, item, wide),
-                              )
-                            : preparing
-                            ? PreparationList(
-                                key: preparationListKey,
-                                store: store,
-                                trip: trip,
-                                beforeChange: () async {
-                                  if (!await leaveEditor(includeQuick: false) ||
-                                      !mounted) {
-                                    return false;
-                                  }
-                                  setState(() => editing = false);
-                                  return true;
-                                },
-                                onEdit: (id) => openPreparation(trip, id, wide),
-                              )
-                            : itinerary(trip, wide),
-                      ),
-                      if (wide && trip != null && editing) ...[
-                        const VerticalDivider(width: 1),
-                        SizedBox(
-                          width: 410,
-                          child: Material(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerLow,
-                            child: activeEditor(trip, embeddedBinding: true),
+                        Expanded(
+                          child: DayMap(
+                            fillWindow: true,
+                            nodes: [
+                              ...store.timeline(trip.id, day),
+                              ...planNodes(
+                                store.items(trip.id),
+                              ).where((n) => n.day == day && n.stay),
+                            ],
+                            onItem: (item) {
+                              setState(() => expandedMap = false);
+                              openEditor(trip, item, size.maxWidth >= 1100);
+                            },
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
               ],
             ),
             floatingActionButton:
-                trip == null || day == 0 || editing || preparing || overview
+                expandedMap ||
+                    trip == null ||
+                    day == 0 ||
+                    editing ||
+                    preparing ||
+                    overview
                 ? null
                 : FloatingActionButton.extended(
                     onPressed: () => openEditor(trip, null, wide),

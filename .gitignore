@@ -57,3 +57,19 @@ dist/
 !/docs/使用说明.md
 # Original design drafts; runtime icons are in platform resource directories
 /design/
+
+# Local exports, diagnostics and release payloads
+/backups/
+/exports/
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.pdb
+*.dmp
+*.exe
+*.zip
+*.key
+
+# Application backup export naming convention
+HowDoI-????-??-??.json
