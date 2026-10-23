@@ -1309,6 +1309,17 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                         store: store,
                                         trip: trip,
                                         onDay: selectDay,
+                                        onPreparations: () async {
+                                          if (!await leaveEditor() ||
+                                              !mounted) {
+                                            return;
+                                          }
+                                          setState(() {
+                                            preparing = true;
+                                            overview = false;
+                                            editing = false;
+                                          });
+                                        },
                                         onItem: (item) =>
                                             openEditor(trip, item, wide),
                                       )

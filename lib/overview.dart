@@ -49,6 +49,17 @@ class TripOverviewData {
     };
     budget = Budget(trip, items);
   }
+  Map<int, List<PlanNode>> get summaryByDay {
+    final seen = <String>{};
+    return {
+      for (final day in [...days, 0])
+        day: [
+          for (final n in byDay[day] ?? <PlanNode>[])
+            if (seen.add(n.item.id)) n,
+        ],
+    };
+  }
+
   int get span => bounds.isEmpty ? 0 : bounds.last - bounds.first + 1;
   int get plannedDays =>
       nodes.where((n) => n.day > 0).map((n) => n.day).toSet().length;
@@ -116,7 +127,7 @@ String overviewItemDetail(Record trip, PlanNode n) {
   final d = n.item.data;
   return [
     if (n.time.isNotEmpty) n.time,
-    '${n.stay ? '当晚住宿 · ' : n.prefix}${itemType(d)}',
+    itemType(d),
     if (fieldText(d, 'number').isNotEmpty) fieldText(d, 'number'),
     if (!n.end && isTransport(d['type']) && fieldText(d, 'endTime').isNotEmpty)
       '到达/结束 ${fieldText(d, 'endTime')}',
@@ -131,12 +142,14 @@ class TripOverview extends StatelessWidget {
   final Record trip;
   final ValueChanged<int> onDay;
   final ValueChanged<Record> onItem;
+  final VoidCallback? onPreparations;
   const TripOverview({
     super.key,
     required this.store,
     required this.trip,
     required this.onDay,
     required this.onItem,
+    this.onPreparations,
   });
 
   @override
@@ -147,25 +160,83 @@ class TripOverview extends StatelessWidget {
       padding: const EdgeInsets.only(top: 20, bottom: 8),
       child: Text(text, style: Theme.of(context).textTheme.titleLarge),
     );
-    Widget item(PlanNode n) => Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ListTile(
-          title: Text(itemTitle(n.item.data)),
-          subtitle: Text(overviewItemDetail(trip, n)),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => onItem(n.item),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: PlaceLinks(
-            store: store,
-            node: n,
-            onEdit: () => onItem(n.item),
+    Widget item(PlanNode n) {
+      final d = n.item.data;
+      final slots = placeSlots(d).where((slot) => hasPlace(d, slot)).toList();
+      String label(String slot) {
+        final text = multiPlace(d) || isTransport(d['type'])
+            ? placeText(d, slot)
+            : (d['name'] as String).trim();
+        return text.isNotEmpty
+            ? text
+            : locationBinding(d, slot)?['name'] ?? itemTitle(d);
+      }
+
+      final title = itemTitle(d);
+      final showTitle =
+          slots.isEmpty ||
+          multiPlace(d) && !(slots.length == 1 && label(slots.single) == title);
+      Widget place(String slot) {
+        final binding = locationBinding(d, slot);
+        final stale = placeStale(d, slot);
+        final prefix = binding?['url'] != null
+            ? ''
+            : linkedPlace(d, slot) != null && !stale
+            ? '导航 · '
+            : '搜索地点 · ';
+        return TextButton(
+          style: TextButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            minimumSize: const Size(48, 48),
+            textStyle: Theme.of(context).textTheme.titleMedium,
           ),
+          onPressed: () => navigatePlace(context, store, d, slot: slot),
+          child: Text('$prefix${label(slot)}${stale ? ' · ⚠ 请核对绑定地点' : ''}'),
+        );
+      }
+
+      return Padding(
+        key: ValueKey('summary:${n.item.id}'),
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (showTitle)
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  if (isTransport(d['type']))
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        for (var i = 0; i < slots.length; i++) ...[
+                          if (i > 0) const Text('→'),
+                          place(slots[i]),
+                        ],
+                      ],
+                    )
+                  else
+                    for (final slot in slots) place(slot),
+                  Text(
+                    overviewItemDetail(trip, n),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: '编辑行程',
+              onPressed: () => onItem(n.item),
+              icon: const Icon(Icons.edit_outlined),
+            ),
+          ],
         ),
-      ],
-    );
+      );
+    }
+
+    final summary = data.summaryByDay;
     final currenciesPresent = currencies.where(
       (c) => data.items.any(
         (r) => (r.data['costs'] as List).any((v) => v['currency'] == c),
@@ -188,50 +259,39 @@ class TripOverview extends StatelessWidget {
             Text('已有旅行日 ${data.days.length} 天'),
             Text('有行程 ${data.plannedDays} 天'),
             Text('行程 ${data.items.length} 条'),
-            Text(
-              '准备 ${prep.where((p) => p['done'] == true).length}/${prep.length}',
+            TextButton(
+              onPressed: onPreparations,
+              child: Text(
+                '准备 ${prep.where((p) => p['done'] == true).length}/${prep.length}',
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        const Text(
-          '跨度包含首末安排日之间的空缺及已记录退房/结束日，不补建日期；有行程天数按每日可见行程计算，含住宿覆盖与跨日抵达。行程数量按原始记录计数，包含历史未安排记录。',
-          style: TextStyle(fontSize: 12),
-        ),
-        heading('按天行程'),
+        heading('行程动向'),
         if (data.days.isEmpty) const Text('尚无旅行日，可从左侧添加日期。'),
-        for (final day in data.days)
-          Card(
-            child: ExpansionTile(
-              key: PageStorageKey('overview-day:${trip.id}:$day'),
-              initiallyExpanded: data.days.length <= 7,
-              title: TextButton(
-                style: TextButton.styleFrom(alignment: Alignment.centerLeft),
-                onPressed: () => onDay(day),
-                child: Text(dayTitle(trip, day)),
-              ),
-              subtitle: Text(
-                '${daySubtitle(trip, day)}${daySubtitle(trip, day).isEmpty ? '' : ' · '}${data.byDay[day]!.map((n) => n.item.id).toSet().length} 条关联行程',
-              ),
-              children: [
-                if (data.byDay[day]!.isEmpty)
-                  const ListTile(title: Text('主动保留的空白日期')),
-                for (final n in data.byDay[day]!) item(n),
-              ],
-            ),
+        for (final day in data.days) ...[
+          TextButton(
+            style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+            onPressed: () => onDay(day),
+            child: Text(dayTitle(trip, day)),
           ),
-        if (data.items.any((r) => r.data['day'] == 0))
-          Card(
-            child: ExpansionTile(
-              key: PageStorageKey('overview-history:${trip.id}'),
-              title: const Text('历史未安排日期的行程'),
-              subtitle: const Text('未纳入日期顺序，预算仍计入总计'),
-              children: [
-                for (final r in data.items.where((r) => r.data['day'] == 0))
-                  item(PlanNode(r, 0)),
-              ],
+          if (daySubtitle(trip, day).isNotEmpty)
+            Text(
+              daySubtitle(trip, day),
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-          ),
+          for (final n in summary[day]!) item(n),
+          if (summary[day]!.isEmpty)
+            Text(
+              data.byDay[day]!.isEmpty ? '暂无行程' : '住宿覆盖或跨日到达，详情见前述行程',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
+        if (summary[0]!.isNotEmpty) ...[
+          heading('历史未安排日期的行程'),
+          const Text('未纳入日期顺序，预算仍计入总计'),
+          for (final n in summary[0]!) item(n),
+        ],
         heading('预计预算 · 原币种'),
         Text('未估算费用 ${data.unknownCosts} 笔 · ${data.noBudgetItems} 条行程未填写预算'),
         if (currenciesPresent.isEmpty) const ListTile(title: Text('暂无预算条目')),
@@ -256,7 +316,7 @@ class TripOverview extends StatelessWidget {
     return Card(
       child: ExpansionTile(
         key: PageStorageKey('overview-currency:${trip.id}:$currency'),
-        initiallyExpanded: true,
+        initiallyExpanded: false,
         title: Text(
           '$currency ${total == null ? '预算未估算' : formatUnits(total, digits(currency))}',
         ),

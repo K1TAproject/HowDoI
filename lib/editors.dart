@@ -642,13 +642,14 @@ class ItemEditorState extends State<ItemEditor> {
     }
     savedId = widget.item?.id;
     openedModified = widget.item?.modified;
+    final initialType = widget.store.frequentTypes(widget.trip.id).first;
     draft = widget.item == null
         ? {
             'trip': widget.trip.id,
             'day': widget.day,
-            'endDay': widget.day,
+            'endDay': initialType == '住宿' ? 0 : widget.day,
             'name': '',
-            'type': '游览/活动',
+            'type': initialType,
             'note': '',
             'booking': '不适用',
             'done': false,
@@ -1041,7 +1042,7 @@ class ItemEditorState extends State<ItemEditor> {
                 PopupMenuButton<String>(
                   tooltip: '选择活动类型',
                   itemBuilder: (_) => [
-                    for (final t in widget.store.frequentTypes())
+                    for (final t in widget.store.frequentTypes(widget.trip.id))
                       PopupMenuItem(value: t, child: Text(t)),
                   ],
                   onSelected: (v) => setState(() {

@@ -84,7 +84,8 @@ void main() {
       await t.pumpAndSettle();
       expect(find.text('查看旅行地图'), findsNothing);
       expect(find.text('选择地点'), findsNothing);
-      expect(find.byType(PlaceLinks), findsOneWidget);
+      expect(find.widgetWithText(TextButton, '搜索地点 · 东京站'), findsOneWidget);
+      expect(find.byTooltip('编辑行程'), findsOneWidget);
       await t.pumpWidget(const SizedBox());
       sync.dispose();
       s.dispose();

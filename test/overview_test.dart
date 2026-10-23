@@ -253,6 +253,8 @@ void main() {
           scrollable: find.byType(Scrollable).last,
         );
         await t.pumpAndSettle();
+        await t.tap(find.text('EUR 40.00'));
+        await t.pumpAndSettle();
         expect(find.text('门票/活动 · EUR 30.00 · 75.0%'), findsOneWidget);
         await t.tap(find.text('门票/活动 · EUR 30.00 · 75.0%'));
         await t.pumpAndSettle();

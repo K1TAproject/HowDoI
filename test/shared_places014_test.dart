@@ -126,13 +126,13 @@ void main() {
       final trip = a.save('trip', tripData());
       final hotel = a.save('item', itemData(trip.id, 'H', type: '住宿'));
       a.save('item', itemData(trip.id, 'F', type: '航班'));
-      expect(a.frequentTypes().take(2), ['住宿', '航班']);
+      expect(a.frequentTypes(trip.id).take(2), ['住宿', '航班']);
       a.save('item', itemData(trip.id, 'F2', type: '航班'));
-      expect(a.frequentTypes().first, '航班');
+      expect(a.frequentTypes(trip.id).first, '航班');
       b.merge(decodeRecords(a.export(sync: true), format: 'howdoi-sync'));
-      expect(b.frequentTypes(), a.frequentTypes());
+      expect(b.frequentTypes(trip.id), a.frequentTypes(trip.id));
       a.remove(hotel);
-      expect(a.frequentTypes().take(2), ['航班', '游览/活动']);
+      expect(a.frequentTypes(trip.id).take(2), ['航班', '游览/活动']);
     },
   );
   for (final platform in [TargetPlatform.windows, TargetPlatform.android]) {

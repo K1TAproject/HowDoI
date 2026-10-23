@@ -305,13 +305,14 @@ class Store extends ChangeNotifier {
     'INSERT OR REPLACE INTO records VALUES (?,?)',
     [r.id, jsonEncode(r.toJson())],
   );
-  List<String> frequentTypes() {
+  List<String> frequentTypes(String tripId) {
     final counts = <String, int>{};
     for (final r in all.where(
       (r) =>
           r.kind == 'item' &&
           !r.deleted &&
-          get(r.data['trip'])?.deleted == false,
+          r.data['trip'] == tripId &&
+          get(tripId)?.deleted == false,
     )) {
       final type = r.data['type'] as String;
       counts[type] = (counts[type] ?? 0) + 1;
