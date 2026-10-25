@@ -919,6 +919,20 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                   padding: const EdgeInsets.only(top: 3),
                                   child: Text(line),
                                 ),
+                              if (type == '住宿' &&
+                                  fieldText(d, 'bookingPlatform').isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    '预订平台：${fieldText(d, 'bookingPlatform')}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
                               if (budgetText.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 6),

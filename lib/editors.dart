@@ -243,6 +243,14 @@ const typeFields = <String, Map<String, String>>{
   '其他': {'opening': '营业时间', 'reservation': '预约时间'},
 };
 
+String defaultBudgetCategory(String type) => isTransport(type)
+    ? '交通'
+    : ['游览', '游览/活动'].contains(type)
+    ? '门票/活动'
+    : categories.contains(type)
+    ? type
+    : '其他';
+
 class ItemEditor extends StatefulWidget {
   final Store store;
   final Record trip;
@@ -313,16 +321,13 @@ class ItemEditorState extends State<ItemEditor> {
 
   String? savedId;
   late List<Map<String, dynamic>> costRows;
+  final editedCostRows = <String>{};
   Map<String, dynamic> blankCost({bool placeholder = false}) => {
     'id': uuid.v4(),
     'label': '',
     'amount': '',
     'currency': widget.trip.data['base'],
-    'category': isTransport(draft['type'])
-        ? '交通'
-        : draft['type'] == '住宿'
-        ? '住宿'
-        : '其他',
+    'category': defaultBudgetCategory(draft['type']),
     if (placeholder) '_placeholder': true,
   };
   Future<bool> saveWithReuse({bool close = true}) async {
@@ -568,7 +573,10 @@ class ItemEditorState extends State<ItemEditor> {
                       '币种',
                       row['currency'],
                       currencies,
-                      (v) => setState(() => row['currency'] = v!),
+                      (v) => setState(() {
+                        editedCostRows.add(row['id']);
+                        row['currency'] = v!;
+                      }),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -581,6 +589,7 @@ class ItemEditorState extends State<ItemEditor> {
                       decoration: const InputDecoration(labelText: '预计金额'),
                       onChanged: (v) {
                         setState(() {
+                          editedCostRows.add(row['id']);
                           row['amount'] = v.trim();
                           if (v.trim().isNotEmpty) row.remove('_placeholder');
                         });
@@ -596,7 +605,10 @@ class ItemEditorState extends State<ItemEditor> {
                       '分类',
                       row['category'],
                       categories,
-                      (v) => setState(() => row['category'] = v!),
+                      (v) => setState(() {
+                        editedCostRows.add(row['id']);
+                        row['category'] = v!;
+                      }),
                     ),
                   ),
                   IconButton(
@@ -948,6 +960,7 @@ class ItemEditorState extends State<ItemEditor> {
       if (stay) main.add(date(true, '退房日期'));
       main.add(clock('startTime', stay ? '计划入住时间' : '计划开始时间'));
       if (stay) {
+        add('bookingPlatform', '预订平台（可空）');
         main.add(clock('endTime', '计划退房时间'));
         if (draft['endDay'] > draft['day'] && draft['day'] > 0) {
           main.add(Text('共 ${draft['endDay'] - draft['day']} 晚'));
@@ -1047,6 +1060,13 @@ class ItemEditorState extends State<ItemEditor> {
                   ],
                   onSelected: (v) => setState(() {
                     draft['type'] = v;
+                    for (final row in costRows) {
+                      if (row['_placeholder'] == true &&
+                          row['amount'] == '' &&
+                          !editedCostRows.contains(row['id'])) {
+                        row['category'] = defaultBudgetCategory(v);
+                      }
+                    }
                     if (multiPlace(draft) && draft['activityPlaces'] == null) {
                       draft['activityPlaces'] = activityPlaces(draft);
                     }

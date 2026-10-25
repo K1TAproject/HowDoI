@@ -270,16 +270,25 @@ class TripOverview extends StatelessWidget {
         heading('行程动向'),
         if (data.days.isEmpty) const Text('尚无旅行日，可从左侧添加日期。'),
         for (final day in data.days) ...[
-          TextButton(
-            style: TextButton.styleFrom(alignment: Alignment.centerLeft),
-            onPressed: () => onDay(day),
-            child: Text(dayTitle(trip, day)),
+          Padding(
+            padding: const EdgeInsets.only(top: 24, bottom: 4),
+            child: TextButton(
+              style: TextButton.styleFrom(
+                alignment: Alignment.centerLeft,
+                textStyle: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              onPressed: () => onDay(day),
+              child: Text(dayTitle(trip, day)),
+            ),
           ),
           if (daySubtitle(trip, day).isNotEmpty)
             Text(
               daySubtitle(trip, day),
               style: Theme.of(context).textTheme.bodySmall,
             ),
+          const SizedBox(height: 12),
           for (final n in summary[day]!) item(n),
           if (summary[day]!.isEmpty)
             Text(
