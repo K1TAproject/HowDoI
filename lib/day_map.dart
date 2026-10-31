@@ -2,11 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 import 'model.dart';
 import 'places.dart';
 import 'planner.dart';
 import 'maps.dart';
+import 'external_binding.dart' show placeSlotLabel;
 
 // A marker is a view of the original record, never a copied itinerary/budget.
 class DayPoint {
@@ -143,7 +144,7 @@ class _DayMapState extends State<DayMap> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${itemTitle(p.visit.node.item.data)} · ${p.visit.node.time}',
+                        '${itemTitle(p.visit.node.item.data)} · ${placeSlotLabel(p.visit.slot)} · ${p.visit.node.time}',
                       ),
                       Wrap(
                         children: [
@@ -353,22 +354,60 @@ class _DayMapState extends State<DayMap> {
                               point: group.first.coordinate,
                               width: 48,
                               height: 48,
+                              alignment: Alignment.topCenter,
                               child: Tooltip(
                                 message: group
-                                    .map(
-                                      (p) => '${p.number}. ${label(p.visit)}',
-                                    )
+                                    .map((p) => label(p.visit))
                                     .join('\n'),
-                                child: FilledButton(
-                                  style: FilledButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    shape: const CircleBorder(),
-                                  ),
+                                child: TextButton(
+                                  style:
+                                      TextButton.styleFrom(
+                                        fixedSize: const Size(48, 48),
+                                        minimumSize: const Size(48, 48),
+                                        padding: EdgeInsets.zero,
+                                        alignment: Alignment.bottomCenter,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ).copyWith(
+                                        overlayColor:
+                                            WidgetStateProperty.resolveWith(
+                                              (states) =>
+                                                  states.contains(
+                                                        WidgetState.hovered,
+                                                      ) ||
+                                                      states.contains(
+                                                        WidgetState.focused,
+                                                      )
+                                                  ? Theme.of(context)
+                                                        .colorScheme
+                                                        .primary
+                                                        .withValues(alpha: .18)
+                                                  : null,
+                                            ),
+                                        side: WidgetStateProperty.resolveWith(
+                                          (states) =>
+                                              states.contains(
+                                                WidgetState.focused,
+                                              )
+                                              ? BorderSide(
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.primary,
+                                                  width: 2,
+                                                )
+                                              : BorderSide.none,
+                                        ),
+                                      ),
                                   onPressed: () => showPoints(group),
-                                  child: Text(
-                                    group.length == 1
-                                        ? '${group.first.number}'
-                                        : '${group.first.number}+${group.length - 1}',
+                                  child: Semantics(
+                                    label: '查看地点：${label(group.first.visit)}',
+                                    child: const CustomPaint(
+                                      size: Size(28, 28),
+                                      painter: MapPinPainter(),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -434,4 +473,34 @@ class _DayMapState extends State<DayMap> {
       ],
     );
   }
+}
+
+// The visible tip reaches the bottom center, the same anchor used by Marker.
+class MapPinPainter extends CustomPainter {
+  const MapPinPainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    canvas.scale(size.width / 28, size.height / 28);
+    final pin = Path()
+      ..moveTo(14, 28)
+      ..cubicTo(10, 23, 3, 17, 3, 11)
+      ..cubicTo(3, -3, 25, -3, 25, 11)
+      ..cubicTo(25, 17, 18, 23, 14, 28)
+      ..close();
+    canvas.drawPath(pin, Paint()..color = const Color(0xFFD32F2F));
+    canvas.drawPath(
+      pin,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.25,
+    );
+    canvas.drawCircle(const Offset(14, 10), 3, Paint()..color = Colors.white);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant MapPinPainter oldDelegate) => false;
 }

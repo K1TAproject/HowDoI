@@ -95,7 +95,13 @@ void main() {
           t.getRect(find.byType(FlutterMap)).bottom,
           lessThanOrEqualTo(900 / scale),
         );
-        await t.tap(find.text('1+1'));
+        await t.tap(
+          find
+              .byWidgetPredicate(
+                (w) => w is CustomPaint && w.painter is MapPinPainter,
+              )
+              .first,
+        );
         await t.pumpAndSettle();
         expect(find.text('此处有 2 次到访'), findsOneWidget);
         await t.tap(find.text('关闭'));

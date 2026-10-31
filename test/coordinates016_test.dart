@@ -311,7 +311,13 @@ void main() {
           t.widget<MarkerLayer>(find.byType(MarkerLayer)).markers,
           hasLength(1),
         );
-        await t.tap(find.text('1+1'));
+        await t.tap(
+          find
+              .byWidgetPredicate(
+                (w) => w is CustomPaint && w.painter is MapPinPainter,
+              )
+              .first,
+        );
         await t.pumpAndSettle();
         expect(find.text('此处有 2 次到访'), findsOneWidget);
         for (var i = 0; i < 2; i++) {
