@@ -149,7 +149,22 @@ void main() {
       });
       var trip = a.save('trip', {...tripData(), 'start': ''});
       a.savePreparations(trip, [
-        {'id': 'passport', 'name': '护照', 'note': '', 'due': '', 'done': false},
+        {
+          'id': 'passport',
+          'name': '护照',
+          'note': '',
+          'due': '',
+          'done': false,
+          'costs': [
+            {
+              'id': 'passport-fee',
+              'label': '',
+              'currency': 'EUR',
+              'amount': '12',
+              'category': '其他',
+            },
+          ],
+        },
       ]);
       trip = a.get(trip.id)!;
       final hotel = a.save('item', {
@@ -264,7 +279,7 @@ void main() {
       expect(b.preparations(b.get(trip.id)!), a.preparations(trip));
       expect(
         Budget(trip, b.items(trip.id)).byCurrency['EUR'],
-        BigInt.from(10000),
+        BigInt.from(11200),
       );
       expect(b.export(), isNot(contains(pairing['token'])));
       expect(b.export(), isNot(contains(pairing['fingerprint'])));
@@ -303,12 +318,36 @@ void main() {
       expect(b.get(hotel.id)!.data['note'], '电脑离线');
       // Whole-trip LWW also includes the preparation list.
       a.savePreparations(a.get(trip.id)!, [
-        {'id': 'passport', 'name': '电脑清单', 'note': '', 'due': '', 'done': true},
+        {
+          'id': 'passport',
+          'name': '电脑清单',
+          'note': '',
+          'due': '',
+          'done': true,
+          'costs': [
+            {
+              'id': 'passport-fee',
+              'label': '',
+              'currency': 'EUR',
+              'amount': '14',
+              'category': '其他',
+            },
+          ],
+        },
       ]);
       b.savePreparations(b.get(trip.id)!, [
         {
           'id': 'passport',
           'name': '手机清单',
+          'costs': [
+            {
+              'id': 'passport-fee',
+              'label': '',
+              'currency': 'EUR',
+              'amount': '16',
+              'category': '其他',
+            },
+          ],
           'note': '',
           'due': '',
           'done': false,

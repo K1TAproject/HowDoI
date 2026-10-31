@@ -4,6 +4,7 @@ import 'model.dart';
 import 'store.dart';
 import 'editors.dart';
 import 'pickers.dart';
+import 'planner.dart';
 
 class PreparationList extends StatefulWidget {
   final Store store;
@@ -117,7 +118,15 @@ class PreparationListState extends State<PreparationList> {
             decoration: p['done'] ? TextDecoration.lineThrough : null,
           ),
         ),
-        subtitle: p['due'] == '' ? null : Text('截止 ${p['due']}'),
+        subtitle: p['due'] == '' && (p['costs'] as List? ?? []).isEmpty
+            ? null
+            : Text(
+                [
+                  if (p['due'] != '') '截止 ${p['due']}',
+                  if ((p['costs'] as List? ?? []).isNotEmpty)
+                    costsBudgetText(p['costs']),
+                ].join('\n'),
+              ),
         trailing: index == null
             ? null
             : ReorderableDragStartListener(
@@ -228,12 +237,31 @@ class PreparationEditorState extends State<PreparationEditor> {
   late String due = original['due'];
   late bool done = original['done'];
   String? error;
+  late final costRows = <Map<String, dynamic>>[
+    for (final c in original['costs'] as List? ?? [])
+      Map<String, dynamic>.from(c),
+    if ((original['costs'] as List? ?? []).isEmpty)
+      {...blankCost(), '_placeholder': true},
+  ];
+  Map<String, dynamic> blankCost() => {
+    'id': uuid.v4(),
+    'label': '',
+    'amount': '',
+    'currency': originalTrip.data['base'],
+    'category': '其他',
+  };
   Map<String, dynamic> value() => {
     ...original,
     'name': name.text.trim(),
     'note': note.text,
     'due': due,
     'done': done,
+    if (original.containsKey('costs') ||
+        costRows.any((c) => c['_placeholder'] != true))
+      'costs': [
+        for (final c in costRows)
+          if (c['_placeholder'] != true) {...c}..remove('_placeholder'),
+      ],
   };
   @override
   void dispose() {
@@ -338,6 +366,12 @@ class PreparationEditorState extends State<PreparationEditor> {
                 },
                 onClear: () => setState(() => due = ''),
               ),
+              inlineBudgetEditor(
+                costRows,
+                change: setState,
+                blankCost: blankCost,
+                edited: (_) {},
+              ),
               Input('备注', note, lines: 5),
               SwitchListTile(
                 title: const Text('已完成'),
@@ -357,7 +391,7 @@ class PreparationEditorState extends State<PreparationEditor> {
                 if (!await confirm(
                       context,
                       '删除准备事项',
-                      '删除“${original['name']}”？',
+                      '删除“${original['name']}”？其 ${(original['costs'] as List? ?? []).length} 笔预计费用也将随事项删除并同步。',
                     ) ||
                     !mounted) {
                   return;

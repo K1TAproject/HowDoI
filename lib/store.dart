@@ -119,6 +119,47 @@ class Store extends ChangeNotifier {
 
   // Validate the whole operation before a single transaction. The preview is
   // invalidated by any intervening local edit or sync.
+  void clearDay(Record trip, int day, {required int expectedGeneration}) {
+    if (generation != expectedGeneration ||
+        get(trip.id)?.modified != trip.modified ||
+        get(trip.id)?.deleted != false) {
+      throw const FormatException('数据已改变，请重新核对清空范围');
+    }
+    if (day < 1 || day > 3660) throw const FormatException('旅行日无效');
+    final primary = primaryItems(trip.id, day);
+    if (primary.isEmpty) throw const FormatException('当天没有可清除的原始行程');
+    final now = DateTime.now().toUtc().microsecondsSinceEpoch;
+    Record changed(
+      String id,
+      String kind,
+      Map<String, dynamic> data,
+      bool deleted,
+    ) {
+      validateData(kind, data);
+      final old = get(id);
+      return Record(
+        id,
+        kind,
+        device,
+        old != null && old.modified >= now ? old.modified + 1 : now,
+        deleted,
+        data,
+      );
+    }
+
+    // Keep the day even if it previously existed only through itinerary nodes.
+    merge([
+      for (final r in primary) changed(r.id, r.kind, r.data, true),
+      changed('day:${trip.id}:$day', 'day', {
+        ...?get('day:${trip.id}:$day')?.data,
+        'trip': trip.id,
+        'day': day,
+        'zone': trip.data['zone'],
+        'explicit': true,
+      }, false),
+    ]);
+  }
+
   void changeDay(
     Record trip,
     int source, {

@@ -458,13 +458,14 @@ Future<int?> chooseDay(
   Map<String, dynamic> trip,
   int current, {
   String existing = '',
+  String fallback = '',
 }) async {
   final start = parseDate(trip['start'] ?? '');
   if (start != null) {
     final value = await calendarDate(
       context,
       existing,
-      fallback: dayDate(trip, current > 0 ? current : 1),
+      fallback: fallback.isNotEmpty ? fallback : dayDate(trip, current),
       first: start,
       last: DateTime(start.year, start.month, start.day + 3659),
     );

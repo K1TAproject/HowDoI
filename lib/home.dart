@@ -458,7 +458,19 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 ],
                 Text('未估算：${b.unknown} 项'),
                 const SizedBox(height: 8),
-                const Text('包含尚未分配日期的历史行程；住宿只计算一次。'),
+                const Text('包含准备工作与尚未分配日期的历史行程；住宿只计算一次。'),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.pop(c);
+                    if (!await leaveEditor() || !mounted) return;
+                    setState(() {
+                      overview = true;
+                      preparing = false;
+                      editing = false;
+                    });
+                  },
+                  child: const Text('查看预算明细'),
+                ),
               ],
             ),
           ),
@@ -573,6 +585,19 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final wasSelected = day == source;
     setState(() => editing = false);
     try {
+      final current = store.get(trip.id);
+      if (current == null || current.deleted) return;
+      if (action == 'clear') {
+        await clearTravelDay(
+          context,
+          store,
+          current,
+          source,
+          onEdit: (r) =>
+              openEditor(current, r, MediaQuery.sizeOf(context).width >= 1100),
+        );
+        return;
+      }
       final selected = await changeTravelDay(
         context,
         store,
@@ -699,6 +724,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 onSelected: (v) => dayAction(trip, i, v),
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: 'move', child: Text('调整日期')),
+                  PopupMenuItem(value: 'clear', child: Text('清空当天行程')),
                   PopupMenuItem(value: 'delete', child: Text('删除日期')),
                 ],
               ),
@@ -1323,6 +1349,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                         store: store,
                                         trip: trip,
                                         onDay: selectDay,
+                                        onPreparation: (id) =>
+                                            openPreparation(trip, id, wide),
                                         onPreparations: () async {
                                           if (!await leaveEditor() ||
                                               !mounted) {

@@ -75,8 +75,12 @@ String durationText(String value) {
 }
 
 String itemBudgetText(Record trip, Record item, {bool whole = false}) {
-  if ((item.data['costs'] as List).isEmpty) return '';
-  final budget = Budget(trip, [item]);
+  return costsBudgetText(item.data['costs'], whole: whole);
+}
+
+String costsBudgetText(List costs, {bool whole = false}) {
+  if (costs.isEmpty) return '';
+  final budget = Budget.costs(costs);
   if (budget.byCurrency.isEmpty) return whole ? '整条行程预算未估算' : '预算未估算';
   final values = [
     for (final c in currencies.where(budget.byCurrency.containsKey))

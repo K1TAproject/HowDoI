@@ -163,3 +163,81 @@ Future<int?> changeTravelDay(
   final days = store.visibleDays(trip.id);
   return days.where((d) => d >= source).firstOrNull ?? days.lastOrNull ?? 0;
 }
+
+Future<void> clearTravelDay(
+  BuildContext context,
+  Store store,
+  Record trip,
+  int day, {
+  required ValueChanged<Record> onEdit,
+}) async {
+  final generation = store.generation;
+  final primary = store.primaryItems(trip.id, day);
+  final related = store.relatedItems(trip.id, day);
+  final result = await showDialog<Object>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text('清空当天行程 · ${dayTitle(trip, day)}'),
+      content: SizedBox(
+        width: 480,
+        height: (MediaQuery.sizeOf(c).height - 240).clamp(160.0, 520.0),
+        child: ListView(
+          children: [
+            if (primary.isEmpty)
+              const Text('当天没有可清除的原始行程，不会删除任何记录。')
+            else
+              Text('将删除当天开始的 ${primary.length} 条原始行程及其预计预算：'),
+            for (final r in primary)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(itemTitle(r.data)),
+                subtitle: Text(
+                  [
+                    '${(r.data['costs'] as List).length} 笔预计费用随原记录移除',
+                    if (r.data['endDay'] > day)
+                      '整条原记录将删除；${dayLabel(trip, day)} 至 ${dayLabel(trip, r.data['endDay'])} 的住宿覆盖/跨日关联展示也将移除',
+                    if ((r.data['costs'] as List).isNotEmpty)
+                      itemBudgetText(trip, r, whole: true),
+                  ].join('\n'),
+                ),
+              ),
+            if (related.isNotEmpty) ...[
+              const Divider(),
+              Text('保留 ${related.length} 条其他日期开始的关联安排及其预算：'),
+              for (final r in related)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(itemTitle(r.data)),
+                  subtitle: Text('${dayLabel(trip, r.data['day'])} 开始 · 编辑原行程'),
+                  trailing: const Icon(Icons.edit_outlined),
+                  onTap: () => Navigator.pop(c, r),
+                ),
+            ],
+            const SizedBox(height: 12),
+            const Text('保留本旅行日和真实日期，不压缩编号、不移动其他日期、不影响准备工作。删除标记将同步至另一端。'),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('取消')),
+        if (primary.isNotEmpty)
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: Text('确认删除 ${primary.length} 条行程'),
+          ),
+      ],
+    ),
+  );
+  if (!context.mounted) return;
+  if (result is Record) {
+    onEdit(result);
+    return;
+  }
+  if (result != true) return;
+  store.clearDay(trip, day, expectedGeneration: generation);
+  final remaining = store.relatedItems(trip.id, day).length;
+  notice(
+    context,
+    remaining > 0 ? '已清除当天开始的行程，仍保留 $remaining 条关联安排' : '已清除当天开始的行程，日期已保留',
+  );
+}

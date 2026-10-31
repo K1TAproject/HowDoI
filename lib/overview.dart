@@ -63,11 +63,16 @@ class TripOverviewData {
   int get span => bounds.isEmpty ? 0 : bounds.last - bounds.first + 1;
   int get plannedDays =>
       nodes.where((n) => n.day > 0).map((n) => n.day).toSet().length;
-  int get unknownCosts => items.fold(
-    0,
-    (n, r) =>
-        n + (r.data['costs'] as List).where((c) => c['amount'] == '').length,
-  );
+  List<({Record? item, Map? preparation, Map cost})> get costEntries => [
+    for (final r in items)
+      for (final c in r.data['costs'])
+        (item: r, preparation: null, cost: c as Map),
+    for (final p in trip.data['preparations'] as List? ?? [])
+      for (final c in p['costs'] as List? ?? [])
+        (item: null, preparation: p as Map, cost: c as Map),
+  ];
+  int get unknownCosts =>
+      costEntries.where((e) => e.cost['amount'] == '').length;
   int get noBudgetItems =>
       items.where((r) => (r.data['costs'] as List).isEmpty).length;
   String get range => bounds.isEmpty
@@ -143,6 +148,7 @@ class TripOverview extends StatelessWidget {
   final ValueChanged<int> onDay;
   final ValueChanged<Record> onItem;
   final VoidCallback? onPreparations;
+  final ValueChanged<String>? onPreparation;
   const TripOverview({
     super.key,
     required this.store,
@@ -150,6 +156,7 @@ class TripOverview extends StatelessWidget {
     required this.onDay,
     required this.onItem,
     this.onPreparations,
+    this.onPreparation,
   });
 
   @override
@@ -238,9 +245,7 @@ class TripOverview extends StatelessWidget {
 
     final summary = data.summaryByDay;
     final currenciesPresent = currencies.where(
-      (c) => data.items.any(
-        (r) => (r.data['costs'] as List).any((v) => v['currency'] == c),
-      ),
+      (c) => data.costEntries.any((e) => e.cost['currency'] == c),
     );
     return ListView(
       key: PageStorageKey('overview:${trip.id}'),
@@ -302,6 +307,7 @@ class TripOverview extends StatelessWidget {
           for (final n in summary[0]!) item(n),
         ],
         heading('预计预算 · 原币种'),
+        const Text('包含行程与准备工作预算；完成勾选不影响统计。'),
         Text('未估算费用 ${data.unknownCosts} 笔 · ${data.noBudgetItems} 条行程未填写预算'),
         if (currenciesPresent.isEmpty) const ListTile(title: Text('暂无预算条目')),
         for (final currency in currenciesPresent)
@@ -317,11 +323,9 @@ class TripOverview extends StatelessWidget {
     String currency,
   ) {
     final total = data.budget.byCurrency[currency];
-    final entries = [
-      for (final r in data.items)
-        for (final c in r.data['costs'])
-          if (c['currency'] == currency) (item: r, cost: c as Map),
-    ];
+    final entries = data.costEntries
+        .where((e) => e.cost['currency'] == currency)
+        .toList();
     return Card(
       child: ExpansionTile(
         key: PageStorageKey('overview-currency:${trip.id}:$currency'),
@@ -367,13 +371,17 @@ class TripOverview extends StatelessWidget {
                     for (final entry in costs)
                       ListTile(
                         title: Text(
-                          '${itemTitle(entry.item.data)} · $currency ${entry.cost['amount'] == '' ? '未估算' : formatUnits(decimalUnits(entry.cost['amount'], digits(currency)), digits(currency))}',
+                          '${entry.item == null ? entry.preparation!['name'] : itemTitle(entry.item!.data)} · $currency ${entry.cost['amount'] == '' ? '未估算' : formatUnits(decimalUnits(entry.cost['amount'], digits(currency)), digits(currency))}',
                         ),
                         subtitle: Text(
-                          '${itemTitle(entry.item.data)} · ${entry.item.data['day'] == 0 ? '历史未安排日期' : dayLabel(trip, entry.item.data['day'])}',
+                          entry.item == null
+                              ? '准备事项 · ${entry.preparation!['name']}'
+                              : '${itemTitle(entry.item!.data)} · ${entry.item!.data['day'] == 0 ? '历史未安排日期' : dayLabel(trip, entry.item!.data['day'])}',
                         ),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: () => onItem(entry.item),
+                        onTap: () => entry.item == null
+                            ? onPreparation?.call(entry.preparation!['id'])
+                            : onItem(entry.item!),
                       ),
                   ],
                 );

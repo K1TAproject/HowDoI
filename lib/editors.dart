@@ -251,6 +251,90 @@ String defaultBudgetCategory(String type) => isTransport(type)
     ? type
     : '其他';
 
+Widget inlineBudgetEditor(
+  List<Map<String, dynamic>> costRows, {
+  required void Function(VoidCallback) change,
+  required Map<String, dynamic> Function() blankCost,
+  required void Function(Map<String, dynamic>) edited,
+}) => ExpansionTile(
+  title: const Text('预计预算'),
+  children: [
+    for (final row in costRows)
+      Padding(
+        key: ValueKey(row['id']),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: choice(
+                    '币种',
+                    row['currency'],
+                    currencies,
+                    (v) => change(() {
+                      edited(row);
+                      row['currency'] = v!;
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextFormField(
+                    initialValue: row['amount'],
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(labelText: '预计金额'),
+                    onChanged: (v) {
+                      change(() {
+                        edited(row);
+                        row['amount'] = v.trim();
+                        if (v.trim().isNotEmpty) row.remove('_placeholder');
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: choice(
+                    '分类',
+                    row['category'],
+                    categories,
+                    (v) => change(() {
+                      edited(row);
+                      row['category'] = v!;
+                    }),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '移除费用',
+                  onPressed: () => change(() => costRows.remove(row)),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+            if (row['_placeholder'] == true)
+              TextButton(
+                onPressed: () => change(() => row.remove('_placeholder')),
+                child: const Text('记为未估算'),
+              )
+            else if (row['amount'] == '')
+              const Text('未估算'),
+          ],
+        ),
+      ),
+    TextButton.icon(
+      onPressed: () => change(() => costRows.add(blankCost())),
+      icon: const Icon(Icons.add),
+      label: const Text('增加费用行'),
+    ),
+  ],
+);
+
 class ItemEditor extends StatefulWidget {
   final Store store;
   final Record trip;
@@ -557,83 +641,11 @@ class ItemEditorState extends State<ItemEditor> {
     );
   }
 
-  Widget budgetEditor() => ExpansionTile(
-    title: const Text('预计预算'),
-    children: [
-      for (final row in costRows)
-        Padding(
-          key: ValueKey(row['id']),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: choice(
-                      '币种',
-                      row['currency'],
-                      currencies,
-                      (v) => setState(() {
-                        editedCostRows.add(row['id']);
-                        row['currency'] = v!;
-                      }),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: row['amount'],
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(labelText: '预计金额'),
-                      onChanged: (v) {
-                        setState(() {
-                          editedCostRows.add(row['id']);
-                          row['amount'] = v.trim();
-                          if (v.trim().isNotEmpty) row.remove('_placeholder');
-                        });
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: choice(
-                      '分类',
-                      row['category'],
-                      categories,
-                      (v) => setState(() {
-                        editedCostRows.add(row['id']);
-                        row['category'] = v!;
-                      }),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '移除费用',
-                    onPressed: () => setState(() => costRows.remove(row)),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ],
-              ),
-              if (row['_placeholder'] == true)
-                TextButton(
-                  onPressed: () => setState(() => row.remove('_placeholder')),
-                  child: const Text('记为未估算'),
-                )
-              else if (row['amount'] == '')
-                const Text('未估算'),
-            ],
-          ),
-        ),
-      TextButton.icon(
-        onPressed: () => setState(() => costRows.add(blankCost())),
-        icon: const Icon(Icons.add),
-        label: const Text('增加费用行'),
-      ),
-    ],
+  Widget budgetEditor() => inlineBudgetEditor(
+    costRows,
+    change: setState,
+    blankCost: blankCost,
+    edited: (row) => editedCostRows.add(row['id']),
   );
 
   final pickerKey = GlobalKey<PickerRegionState>();
@@ -838,8 +850,15 @@ class ItemEditorState extends State<ItemEditor> {
         final selected = await chooseDay(
           anchor,
           widget.trip.data,
-          draft[dayKey],
-          existing: controller.text,
+          draft[dayKey] > 0
+              ? draft[dayKey]
+              : draft['day'] > 0
+              ? draft['day']
+              : widget.day,
+          existing: controller.text.isNotEmpty
+              ? controller.text
+              : dayDate(widget.trip.data, draft[dayKey]),
+          fallback: end ? field('startDate').text : '',
         );
         if (selected != null && mounted) {
           setState(() {
@@ -1123,7 +1142,10 @@ class ItemEditorState extends State<ItemEditor> {
                           final v = await calendarDate(
                             anchor,
                             field('reservationDate').text,
-                            fallback: dayDate(widget.trip.data, draft['day']),
+                            fallback: dayDate(
+                              widget.trip.data,
+                              draft['day'] > 0 ? draft['day'] : widget.day,
+                            ),
                           );
                           if (v != null && mounted) {
                             setState(() => field('reservationDate').text = v);

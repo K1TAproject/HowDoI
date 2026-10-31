@@ -221,6 +221,7 @@ void validateData(String kind, Map<String, dynamic> d) {
           throw const FormatException('准备事项名称或字段无效');
         }
         parseDate(p['due']);
+        if (p.containsKey('costs')) validateCosts(p['costs']);
       }
     }
     tz.getLocation(d['zone']);
@@ -274,22 +275,7 @@ void validateData(String kind, Map<String, dynamic> d) {
           throw const FormatException('时间应为 HH:mm');
         }
       }
-      if ((d['costs'] as List).length > 200) {
-        throw const FormatException('费用明细过多');
-      }
-      final ids = <String>{};
-      for (final c in d['costs']) {
-        if (c is! Map ||
-            c['id'] is! String ||
-            !ids.add(c['id']) ||
-            c['label'] is! String ||
-            !currencies.contains(c['currency']) ||
-            !categories.contains(c['category']) ||
-            c['amount'] is! String) {
-          throw const FormatException('费用格式错误');
-        }
-        if (c['amount'] != '') decimalUnits(c['amount'], digits(c['currency']));
-      }
+      validateCosts(d['costs']);
     } else if (kind == 'order') {
       if (d['ids'] is! List ||
           (d['ids'] as List).length > 20000 ||
@@ -304,6 +290,26 @@ void validateData(String kind, Map<String, dynamic> d) {
       string('zone');
       tz.getLocation(d['zone']);
     }
+  }
+}
+
+void validateCosts(dynamic costs) {
+  if (costs is! List) throw const FormatException('费用格式错误');
+  if (costs.length > 200) {
+    throw const FormatException('费用明细过多');
+  }
+  final ids = <String>{};
+  for (final c in costs) {
+    if (c is! Map ||
+        c['id'] is! String ||
+        !ids.add(c['id']) ||
+        c['label'] is! String ||
+        !currencies.contains(c['currency']) ||
+        !categories.contains(c['category']) ||
+        c['amount'] is! String) {
+      throw const FormatException('费用格式错误');
+    }
+    if (c['amount'] != '') decimalUnits(c['amount'], digits(c['currency']));
   }
 }
 
@@ -335,20 +341,29 @@ class Budget {
   Budget(Record trip, Iterable<Record> items) {
     for (final item in items) {
       if ((item.data['costs'] as List).isEmpty) unknown++;
-      for (final c in item.data['costs']) {
-        if (c['amount'] == '') {
-          unknown++;
-          continue;
-        }
-        final currency = c['currency'] as String;
-        final amount = decimalUnits(c['amount'], digits(currency));
-        byCurrency[currency] = (byCurrency[currency] ?? BigInt.zero) + amount;
-        final subtotal = byCategory.putIfAbsent(
-          c['category'],
-          () => <String, BigInt>{},
-        );
-        subtotal[currency] = (subtotal[currency] ?? BigInt.zero) + amount;
+      add(item.data['costs']);
+    }
+    for (final p in trip.data['preparations'] as List? ?? []) {
+      add(p['costs'] as List? ?? []);
+    }
+  }
+  Budget.costs(List costs) {
+    add(costs);
+  }
+  void add(List costs) {
+    for (final c in costs) {
+      if (c['amount'] == '') {
+        unknown++;
+        continue;
       }
+      final currency = c['currency'] as String;
+      final amount = decimalUnits(c['amount'], digits(currency));
+      byCurrency[currency] = (byCurrency[currency] ?? BigInt.zero) + amount;
+      final subtotal = byCategory.putIfAbsent(
+        c['category'],
+        () => <String, BigInt>{},
+      );
+      subtotal[currency] = (subtotal[currency] ?? BigInt.zero) + amount;
     }
   }
 }
